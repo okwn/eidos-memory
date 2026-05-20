@@ -1,0 +1,8 @@
+{
+  "name": "continue",
+  "description": "Continue.dev — open-source AI code assistant",
+  "detect": ["continue"],
+  "injection_mode": "mcp",
+  "mcp_tool": "assemble_context",
+  "install": "VS Code extension: continue.continue"
+}

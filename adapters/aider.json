@@ -1,0 +1,7 @@
+{
+  "name": "aider",
+  "detect": ["aider"],
+  "mode": "wrap",
+  "prompt_arg": 0,
+  "inject_as": "prepend"
+}

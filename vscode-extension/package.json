@@ -1,0 +1,74 @@
+{
+  "name": "eidos-memory-vscode",
+  "displayName": "EidosCore Memory",
+  "description": "Universal AI memory engine — auto-prefetch context signals in VS Code",
+  "version": "0.1.0",
+  "publisher": "eidos-memory",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["AI", "Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "EidosCore",
+      "properties": {
+        "eidosCore.mcpPort": {
+          "type": "number", "default": 3742,
+          "description": "Port of the running EidosCore MCP server"
+        },
+        "eidosCore.enabled": {
+          "type": "boolean", "default": true,
+          "description": "Enable EidosCore memory signals"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "eidosSidebar",
+          "title": "EidosCore Memory",
+          "icon": "$(database)"
+        }
+      ]
+    },
+    "views": {
+      "eidosSidebar": [
+        {
+          "id": "eidosMemoryTree",
+          "name": "Memory Graph",
+          "icon": "$(database)",
+          "contextualTitle": "EidosCore Memory Graph"
+        }
+      ]
+    },
+    "commands": [
+      { "command": "eidos.prefetch",          "title": "EidosCore: Prefetch Current File" },
+      { "command": "eidos.openDashboard",      "title": "EidosCore: Open Dashboard" },
+      { "command": "eidos.refreshTree",        "title": "EidosCore: Refresh Memory Tree", "icon": "$(refresh)" },
+      { "command": "eidos.showFileKnowledge",  "title": "EidosCore: Show What Eidos Knows About This File" }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "eidos.refreshTree",
+          "when": "view == eidosMemoryTree",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "eidos.showFileKnowledge",
+          "group": "eidos"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.0.0"
+  }
+}

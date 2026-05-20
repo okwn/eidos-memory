@@ -1,0 +1,9 @@
+{
+  "name": "open-interpreter",
+  "description": "Open Interpreter — natural language code execution",
+  "detect": ["interpreter"],
+  "injection_mode": "system_prompt",
+  "system_flag": "--system_message",
+  "prompt_arg_index": 1,
+  "install": "pip install open-interpreter"
+}

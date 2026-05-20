@@ -1,0 +1,8 @@
+{
+  "name": "sgpt",
+  "description": "Shell GPT — AI in your terminal",
+  "detect": ["sgpt", "shell-gpt"],
+  "injection_mode": "prepend",
+  "prompt_arg_index": 1,
+  "install": "pip install shell-gpt"
+}

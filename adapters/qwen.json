@@ -1,0 +1,16 @@
+{
+  "name": "qwen",
+  "detect": ["qwen"],
+  "mode": "wrap",
+  "prompt_extraction": {
+    "source": "stdin_or_args",
+    "arg_index": null,
+    "stdin_fallback": true
+  },
+  "injection": {
+    "method": "system_message",
+    "format": "<system>{context}</system>\n\n<user>{prompt}</user>"
+  },
+  "interactive_mode": true,
+  "timeout_ms": 120000
+}

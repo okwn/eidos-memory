@@ -1,0 +1,7 @@
+{
+  "name": "gemini",
+  "detect": ["gemini"],
+  "mode": "wrap",
+  "prompt_arg": 0,
+  "inject_as": "prepend"
+}

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EidosCore Dashboard</title>
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+      --text: #e2e8f0; --muted: #64748b; --accent: #6366f1;
+      --green: #10b981; --red: #ef4444; --orange: #f59e0b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+    header { display: flex; align-items: center; gap: 12px; padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+    header h1 { font-size: 1.2rem; font-weight: 700; color: var(--accent); }
+    header span { font-size: 0.85rem; color: var(--muted); }
+    .layout { display: grid; grid-template-columns: 280px 1fr; grid-template-rows: auto 1fr; gap: 0; height: calc(100vh - 57px); }
+    .sidebar { grid-row: 1 / 3; background: var(--surface); border-right: 1px solid var(--border); padding: 20px 16px; overflow-y: auto; }
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+    .stat-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+    .stat-card .val { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+    .stat-card .lbl { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+    .savings-card { background: linear-gradient(135deg, #1a2744, #1a2733); border: 1px solid #2a4a3e; border-radius: 10px; padding: 14px; margin-bottom: 20px; }
+    .savings-card .title { font-size: 0.75rem; color: var(--green); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+    .savings-card .big { font-size: 1.8rem; font-weight: 800; color: var(--green); }
+    .savings-card .sub { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+    .weights-section h3 { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
+    .weight-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 0.82rem; }
+    .weight-bar-wrap { width: 80px; height: 6px; background: var(--border); border-radius: 3px; }
+    .weight-bar { height: 100%; background: var(--accent); border-radius: 3px; }
+    .top-area { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: center; }
+    .tab-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: 0.85rem; transition: all 0.15s; }
+    .tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    #graph-container { width: 100%; height: 100%; }
+    .chart-area { padding: 24px; display: none; }
+    .chart-area.visible { display: block; }
+    #graph-wrap { height: 100%; display: none; }
+    #graph-wrap.visible { display: block; }
+    canvas { max-height: 320px; }
+    .audit-list { font-size: 0.78rem; color: var(--muted); max-height: 300px; overflow-y: auto; margin-top: 16px; }
+    .audit-row { padding: 6px 0; border-bottom: 1px solid var(--border); display: flex; gap: 8px; }
+    .audit-event { color: var(--accent); min-width: 130px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; font-size: 0.75rem; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+    #refresh-btn { margin-left: auto; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: 0.8rem; }
+    #refresh-btn:hover { background: var(--border); color: var(--text); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>⚡ EidosCore</h1>
+    <span>Knowledge Hypergraph Dashboard</span>
+    <div id="mcp-status" style="margin-left:12px;display:flex;align-items:center;gap:5px;font-size:0.78rem;">
+      <span id="mcp-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block;"></span>
+      <span id="mcp-label" style="color:var(--muted)">MCP —</span>
+    </div>
+    <button id="refresh-btn" onclick="loadAll()">↻ Refresh</button>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="savings-card">
+        <div class="title">Tokens Saved</div>
+        <div class="big" id="tokens-saved">—</div>
+        <div class="sub" id="dollars-saved">$— saved</div>
+      </div>
+      <div class="stats-grid" id="stats-grid"></div>
+      <div class="weights-section">
+        <h3>Retrieval Weights</h3>
+        <div id="weights-rows"></div>
+      </div>
+    </aside>
+
+    <div class="top-area">
+      <button class="tab-btn active" onclick="switchTab('graph', this)">Graph</button>
+      <button class="tab-btn" onclick="switchTab('charts', this)">Savings Charts</button>
+      <button class="tab-btn" onclick="switchTab('audit', this)">Audit Log</button>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <div id="graph-wrap" class="visible">
+      <div id="graph-container"></div>
+    </div>
+    <div class="chart-area" id="charts-area">
+      <canvas id="savings-chart"></canvas>
+      <canvas id="nodes-chart" style="margin-top:24px"></canvas>
+    </div>
+    <div class="chart-area" id="audit-area">
+      <h3 style="font-size:0.85rem;color:var(--muted);margin-bottom:8px;">Recent Audit Events</h3>
+      <div class="audit-list" id="audit-list"></div>
+    </div>
+  </div>
+
+<script>
+  const TYPE_COLORS = {
+    chunk: '#6366f1', file: '#8b5cf6', conversation_turn: '#06b6d4',
+    meso_block: '#10b981', decision: '#f59e0b', task: '#f97316',
+    error_memory: '#ef4444', qms: '#a855f7', default: '#64748b',
+  };
+
+  let network = null;
+  let savingsChart = null;
+  let nodesChart = null;
+  let loading = false;
+
+  function switchTab(tab, btn) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('graph-wrap').classList.toggle('visible', tab === 'graph');
+    document.getElementById('charts-area').classList.toggle('visible', tab === 'charts');
+    document.getElementById('audit-area').classList.toggle('visible', tab === 'audit');
+  }
+
+  async function loadStats() {
+    const data = await fetch('/api/stats').then(r => r.json());
+    document.getElementById('tokens-saved').textContent = data.tokensSaved.toLocaleString();
+    document.getElementById('dollars-saved').textContent = `$${data.dollarsSaved.toFixed(4)} saved`;
+
+    const items = [
+      { val: data.totalNodes, lbl: 'Total Nodes' },
+      { val: data.totalEdges, lbl: 'Total Edges' },
+      { val: data.chunkNodes, lbl: 'Code Chunks' },
+      { val: data.fileNodes,  lbl: 'Files Indexed' },
+      { val: data.turnNodes,  lbl: 'Conv. Turns' },
+      { val: data.mesoNodes,  lbl: 'Meso Blocks' },
+      { val: data.errorNodes, lbl: 'Error Memory' },
+      { val: data.feedbackCount ? data.avgFeedback.toFixed(1) : '—', lbl: 'Avg Feedback' },
+    ];
+    document.getElementById('stats-grid').innerHTML = items.map(i =>
+      `<div class="stat-card"><div class="val">${i.val}</div><div class="lbl">${i.lbl}</div></div>`
+    ).join('');
+
+    const wNames = { alpha: 'α cos-sim', beta: 'β graph', gamma: 'γ recency', delta: 'δ cost', epsilon: 'ε overlap' };
+    document.getElementById('weights-rows').innerHTML = Object.entries(data.weights || {}).map(([k, v]) =>
+      `<div class="weight-row">
+        <span>${wNames[k] || k}</span>
+        <div class="weight-bar-wrap"><div class="weight-bar" style="width:${(v*100).toFixed(0)}%"></div></div>
+        <span style="font-size:0.75rem;color:var(--muted)">${(+v).toFixed(3)}</span>
+      </div>`
+    ).join('');
+
+    // Savings chart
+    const ctx1 = document.getElementById('savings-chart').getContext('2d');
+    if (savingsChart) savingsChart.destroy();
+    savingsChart = new Chart(ctx1, {
+      type: 'bar',
+      data: {
+        labels: ['Tokens Saved', 'Cost Saved ($×1000)'],
+        datasets: [{ data: [data.tokensSaved, data.dollarsSaved * 1000], backgroundColor: ['#10b981','#6366f1'], borderRadius: 6 }]
+      },
+      options: { plugins: { legend: { display: false } }, scales: { y: { ticks: { color: '#64748b' }, grid: { color: '#2a2d3e' } }, x: { ticks: { color: '#64748b' }, grid: { color: '#2a2d3e' } } }, responsive: true }
+    });
+
+    // Node breakdown chart
+    const ctx2 = document.getElementById('nodes-chart').getContext('2d');
+    if (nodesChart) nodesChart.destroy();
+    nodesChart = new Chart(ctx2, {
+      type: 'doughnut',
+      data: {
+        labels: ['Chunks','Files','Turns','Meso','Decisions','Errors'],
+        datasets: [{ data: [data.chunkNodes, data.fileNodes, data.turnNodes, data.mesoNodes, data.decisionNodes, data.errorNodes],
+          backgroundColor: ['#6366f1','#8b5cf6','#06b6d4','#10b981','#f59e0b','#ef4444'], borderWidth: 0 }]
+      },
+      options: { plugins: { legend: { labels: { color: '#e2e8f0', font: { size: 12 } } } }, responsive: true }
+    });
+  }
+
+  async function loadGraph() {
+    const data = await fetch('/api/graph').then(r => r.json());
+    const visNodes = data.nodes.map(n => ({
+      id: n.id, label: n.label,
+      color: { background: TYPE_COLORS[n.type] || TYPE_COLORS.default, border: '#fff2', highlight: { background: '#fff', border: '#fff' } },
+      font: { color: '#e2e8f0', size: 11 },
+      size: 8 + n.importance * 16,
+      title: `${n.type}: ${n.label}`,
+    }));
+    const visEdges = data.edges.map(e => ({
+      from: e.source_id, to: e.target_id,
+      color: { color: '#3a3d4e', highlight: '#6366f1' },
+      arrows: { to: { enabled: true, scaleFactor: 0.4 } },
+      width: Math.min(3, e.weight),
+      title: e.rel_type,
+    }));
+
+    // Build legend
+    const seenTypes = [...new Set(data.nodes.map(n => n.type))];
+    document.getElementById('legend').innerHTML = seenTypes.map(t =>
+      `<span><span class="legend-dot" style="background:${TYPE_COLORS[t]||TYPE_COLORS.default}"></span>${t}</span>`
+    ).join('');
+
+    const container = document.getElementById('graph-container');
+    if (network) network.destroy();
+    network = new vis.Network(container,
+      { nodes: new vis.DataSet(visNodes), edges: new vis.DataSet(visEdges) },
+      {
+        physics: { stabilization: { iterations: 100 }, barnesHut: { gravitationalConstant: -3000, damping: 0.4 } },
+        interaction: { tooltipDelay: 100, hover: true },
+        layout: { improvedLayout: false },
+      }
+    );
+  }
+
+  async function loadAudit() {
+    const entries = await fetch('/api/audit').then(r => r.json());
+    document.getElementById('audit-list').innerHTML = entries.map(e => {
+      const ts = new Date(e.ts).toISOString().slice(11, 19);
+      const detail = e.detail || e.filePath || (e.tokens ? `${e.tokens} tok` : '');
+      return `<div class="audit-row"><span class="audit-event">${e.event}</span><span style="color:#94a3b8">[${ts}]</span><span>${detail}</span></div>`;
+    }).join('') || '<div style="padding:8px;color:var(--muted)">No audit entries yet.</div>';
+  }
+
+  async function loadMCP() {
+    try {
+      const s = await fetch("/api/mcp-status").then(r => r.json());
+      const dot = document.getElementById("mcp-dot");
+      const lbl = document.getElementById("mcp-label");
+      if (s.connected) {
+        dot.style.background = "#10b981";
+        lbl.style.color = "#10b981";
+        lbl.textContent = "MCP :" + s.mcpPort;
+      } else {
+        dot.style.background = "#ef4444";
+        lbl.style.color = "#ef4444";
+        lbl.textContent = "MCP Offline";
+      }
+    } catch {}
+  }
+
+  async function loadAll() {
+    if (loading) return;
+    loading = true;
+    try {
+      await Promise.all([loadStats(), loadGraph(), loadAudit(), loadMCP()]);
+    } finally {
+      loading = false;
+    }
+  }
+
+  loadAll();
+  setInterval(loadAll, 10000);
+</script>
+</body>
+</html>

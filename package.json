@@ -1,0 +1,96 @@
+{
+  "name": "eidos-memory",
+  "version": "0.1.0",
+  "description": "Universal AI memory engine — 98% token savings, works with any CLI",
+  "author": "sairajbaman <bamansairaj6@gmail.com>",
+  "type": "module",
+  "bin": {
+    "eidos": "./dist/cli/index.js"
+  },
+  "main": "./dist/cli/index.js",
+  "scripts": {
+    "build": "tsc && node -e \"const fs=require('fs'),path=require('path');const src='src/dashboard/public';const dst='dist/dashboard/public';fs.mkdirSync(dst,{recursive:true});fs.readdirSync(src).forEach(f=>fs.copyFileSync(path.join(src,f),path.join(dst,f)));console.log('[build] Copied dashboard/public → dist/dashboard/public');\"",
+    "dev": "tsc --watch",
+    "start": "node dist/cli/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "mcp": "node dist/mcp/server.js",
+    "nightly": "node dist/tuner/nightly.js",
+    "dash": "node dist/cli/index.js dash",
+    "postinstall": "node -e \"if(process.env.npm_config_global){console.log('\\n\\x1b[36m⚡ EidosCore installed!\\x1b[0m  Run \\x1b[1meidos setup\\x1b[0m to get started in 30 seconds.\\n')}\"",
+    "prepublishOnly": "npm run build && npm test",
+    "release": "node scripts/release.mjs",
+    "release:minor": "node scripts/release.mjs minor",
+    "release:major": "node scripts/release.mjs major",
+    "demo": "node dist/cli/index.js demo"
+  },
+  "files": [
+    "dist/",
+    "adapters/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    ".github/"
+  ],
+  "exports": {
+    ".": "./dist/cli/index.js",
+    "./mcp": "./dist/mcp/server.js",
+    "./store": "./dist/store/db.js",
+    "./engine": "./dist/engine/embedding.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sairajbaman/eidos-memory"
+  },
+  "homepage": "https://github.com/sairajbaman/eidos-memory#readme",
+  "bugs": {
+    "url": "https://github.com/sairajbaman/eidos-memory/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@xenova/transformers": "^2.17.2",
+    "better-sqlite3": "^11.0.0",
+    "commander": "^12.1.0",
+    "fast-diff": "^1.3.0",
+    "ignore": "^5.3.2",
+    "js-tiktoken": "^1.0.15",
+    "sqlite-vec": "^0.1.9",
+    "sqlite-vss": "^0.1.2",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.22.6"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.5.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.1"
+  },
+  "keywords": [
+    "ai-memory",
+    "token-savings",
+    "mcp",
+    "llm",
+    "context-window",
+    "developer-tools",
+    "claude",
+    "gemini",
+    "qwen",
+    "coding-assistant",
+    "rag",
+    "knowledge-graph",
+    "aider",
+    "vector-search",
+    "embeddings",
+    "sqlite",
+    "model-context-protocol",
+    "ai",
+    "memory",
+    "productivity"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

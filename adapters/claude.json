@@ -1,0 +1,8 @@
+{
+  "name": "claude-code",
+  "detect": ["claude"],
+  "mode": "wrap",
+  "prompt_arg": 0,
+  "inject_as": "prepend",
+  "system_flag": "--system-prompt"
+}

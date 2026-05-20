@@ -1,0 +1,9 @@
+{
+  "name": "llm",
+  "description": "Simon Willison's llm CLI",
+  "detect": ["llm"],
+  "injection_mode": "prepend",
+  "prompt_arg_index": 1,
+  "system_flag": "--system",
+  "install": "pip install llm"
+}

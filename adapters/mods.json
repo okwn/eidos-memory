@@ -1,0 +1,8 @@
+{
+  "name": "mods",
+  "description": "Charmbracelet mods — AI in your terminal, with style",
+  "detect": ["mods"],
+  "injection_mode": "prepend",
+  "prompt_arg_index": 1,
+  "install": "brew install charmbracelet/tap/mods"
+}

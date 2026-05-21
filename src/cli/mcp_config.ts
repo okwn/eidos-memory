@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import { c } from './spinner.js';
 
-type McpClient = 'claude-desktop' | 'continue' | 'vscode' | 'generic';
+type McpClient = 'claude-desktop' | 'continue' | 'vscode' | 'qwen' | 'generic';
 
 interface McpSnippet {
   description: string;
@@ -12,7 +12,6 @@ interface McpSnippet {
 }
 
 function getWorkspace(): string {
-  // Check EIDOS_WORKSPACE env, then eidos.config.json, then cwd
   if (process.env['EIDOS_WORKSPACE']) return process.env['EIDOS_WORKSPACE'];
   const cfgPath = path.join(process.cwd(), 'eidos.config.json');
   if (fs.existsSync(cfgPath)) {
@@ -24,18 +23,33 @@ function getWorkspace(): string {
   return process.cwd();
 }
 
-async function getSnippet(client: McpClient, workspace: string): Promise<McpSnippet> {
+// All Eidos MCP tool names for auto-permissions
+const EIDOS_TOOL_PERMISSIONS = [
+  'mcp__eidos-memory__assemble_context',
+  'mcp__eidos-memory__search_memory',
+  'mcp__eidos-memory__remember',
+  'mcp__eidos-memory__log_conversation',
+  'mcp__eidos-memory__generate_qms',
+  'mcp__eidos-memory__load_qms',
+  'mcp__eidos-memory__index_project',
+  'mcp__eidos-memory__feedback',
+  'mcp__eidos-memory__get_context_delta',
+  'mcp__eidos-memory__compress_text',
+  'mcp__eidos-memory__prefetch',
+  'mcp__eidos-memory__update_file',
+];
+
+async function getSnippet(client: McpClient, _workspace: string): Promise<McpSnippet> {
   const command = process.platform === 'win32' ? 'eidos.cmd' : 'eidos';
   const npxArgs = ['-y', 'eidos-memory', 'mcp'];
   const localArgs = [command, 'mcp'];
-  const env = { EIDOS_WORKSPACE: workspace };
 
-  // Try to detect if eidos is globally installed
   const useNpx = !(await isGloballyInstalled());
   const args = useNpx ? npxArgs : localArgs.slice(1);
   const cmd  = useNpx ? 'npx' : command;
 
-  const serverBlock = { command: cmd, args, env };
+  // No hardcoded EIDOS_WORKSPACE — let EidosCore auto-detect from cwd
+  const serverBlock = { command: cmd, args };
 
   switch (client) {
     case 'claude-desktop': {
@@ -45,7 +59,7 @@ async function getSnippet(client: McpClient, workspace: string): Promise<McpSnip
           ? path.join(os.homedir(), 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json')
           : path.join(os.homedir(), '.config', 'Claude', 'claude_desktop_config.json');
       return {
-        description: 'Claude Desktop (~/.config/Claude/claude_desktop_config.json)',
+        description: 'Claude Desktop',
         configPath,
         json: { mcpServers: { 'eidos-memory': serverBlock } },
       };
@@ -53,12 +67,12 @@ async function getSnippet(client: McpClient, workspace: string): Promise<McpSnip
     case 'continue': {
       const configPath = path.join(os.homedir(), '.continue', 'config.json');
       return {
-        description: 'Continue.dev (~/.continue/config.json)',
+        description: 'Continue.dev',
         configPath,
         json: {
           experimental: {
             modelContextProtocolServers: [{
-              transport: { type: 'stdio', command: cmd, args, env },
+              transport: { type: 'stdio', command: cmd, args },
             }],
           },
         },
@@ -67,12 +81,23 @@ async function getSnippet(client: McpClient, workspace: string): Promise<McpSnip
     case 'vscode': {
       const configPath = path.join(process.cwd(), '.vscode', 'mcp.json');
       return {
-        description: 'VS Code (.vscode/mcp.json)',
+        description: 'VS Code',
         configPath,
         json: {
           servers: {
-            'eidos-memory': { type: 'stdio', command: cmd, args, env },
+            'eidos-memory': { type: 'stdio', command: cmd, args },
           },
+        },
+      };
+    }
+    case 'qwen': {
+      const configPath = path.join(os.homedir(), '.qwen', 'settings.json');
+      return {
+        description: 'Qwen Code',
+        configPath,
+        json: {
+          mcpServers: { 'eidos-memory': serverBlock },
+          permissions: { allow: EIDOS_TOOL_PERMISSIONS },
         },
       };
     }
@@ -139,4 +164,99 @@ function deepMerge(base: Record<string, unknown>, override: Record<string, unkno
     }
   }
   return result;
+}
+
+/**
+ * Qwen-specific merge: handles mcpServers, permissions.allow, and disables competing memory servers.
+ */
+function mergeQwenConfig(existing: Record<string, unknown>, snippet: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...existing };
+
+  // Merge mcpServers
+  const existingServers = (existing['mcpServers'] ?? {}) as Record<string, unknown>;
+  const newServers = (snippet['mcpServers'] ?? {}) as Record<string, unknown>;
+  result['mcpServers'] = { ...existingServers, ...newServers };
+
+  // Disable competing generic memory server if present
+  const servers = result['mcpServers'] as Record<string, unknown>;
+  if (servers['memory'] && servers['eidos-memory']) {
+    const memServer = servers['memory'] as Record<string, unknown>;
+    if (!memServer['_disabled']) {
+      memServer['_disabled'] = true;
+      servers['memory'] = memServer;
+    }
+  }
+
+  // Merge permissions.allow — add Eidos tools without removing existing permissions
+  const existingPerms = (existing['permissions'] ?? {}) as Record<string, unknown>;
+  const existingAllow = (existingPerms['allow'] ?? []) as string[];
+  const newAllow = (snippet['permissions'] as Record<string, unknown>)?.['allow'] as string[] ?? [];
+  const mergedAllow = [...new Set([...existingAllow, ...newAllow])];
+  result['permissions'] = { ...existingPerms, allow: mergedAllow };
+
+  return result;
+}
+
+/**
+ * Detect all installed MCP clients and auto-configure EidosCore for each one.
+ * Called during `eidos init` so users never have to manually edit config files.
+ */
+export async function autoDetectAndConfigureMcp(workspace: string): Promise<string[]> {
+  const configured: string[] = [];
+
+  const candidates: Array<{ client: McpClient; check: () => boolean }> = [
+    {
+      client: 'qwen',
+      check: () => fs.existsSync(path.join(os.homedir(), '.qwen', 'settings.json')),
+    },
+    {
+      client: 'claude-desktop',
+      check: () => {
+        const p = process.platform === 'darwin'
+          ? path.join(os.homedir(), 'Library', 'Application Support', 'Claude')
+          : process.platform === 'win32'
+            ? path.join(os.homedir(), 'AppData', 'Roaming', 'Claude')
+            : path.join(os.homedir(), '.config', 'Claude');
+        return fs.existsSync(p);
+      },
+    },
+    {
+      client: 'continue',
+      check: () => fs.existsSync(path.join(os.homedir(), '.continue', 'config.json')),
+    },
+    {
+      client: 'vscode',
+      check: () => fs.existsSync(path.join(process.cwd(), '.vscode')),
+    },
+  ];
+
+  for (const { client, check } of candidates) {
+    if (!check()) continue;
+
+    try {
+      const snippet = await getSnippet(client, workspace);
+      if (!snippet.configPath) continue;
+
+      fs.mkdirSync(path.dirname(snippet.configPath), { recursive: true });
+
+      let existing: Record<string, unknown> = {};
+      if (fs.existsSync(snippet.configPath)) {
+        try {
+          existing = JSON.parse(fs.readFileSync(snippet.configPath, 'utf-8')) as Record<string, unknown>;
+        } catch { /* start fresh */ }
+      }
+
+      // Use Qwen-specific merge for Qwen, generic deepMerge for others
+      const merged = client === 'qwen'
+        ? mergeQwenConfig(existing, snippet.json as Record<string, unknown>)
+        : deepMerge(existing, snippet.json as Record<string, unknown>);
+
+      fs.writeFileSync(snippet.configPath, JSON.stringify(merged, null, 2));
+      configured.push(snippet.description);
+    } catch {
+      // Skip clients that fail to configure
+    }
+  }
+
+  return configured;
 }

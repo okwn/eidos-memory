@@ -229,7 +229,7 @@ async function checkPkgVersion(): Promise<Check> {
       }
     }
   } catch { /* ignore */ }
-  return ok('EidosCore version', 'v0.1.0');
+  return ok('EidosCore version', 'v0.2.0');
 }
 
 export async function runDoctor(): Promise<void> {

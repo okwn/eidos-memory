@@ -1,6 +1,6 @@
 import { getDb } from '../store/db.js';
 import { listNodes, upsertNode } from '../store/nodes.js';
-import { upsertEdge, getEdgesFrom } from '../store/edges.js';
+import { upsertEdge } from '../store/edges.js';
 import { randomUUID } from 'crypto';
 
 export async function replaySession(sessionId: string): Promise<void> {
@@ -70,9 +70,7 @@ export async function branchSession(
   const parentSessionId = String(p['session_id'] ?? '');
 
   // Get all turns that belong to this meso-block
-  const edges = getEdgesFrom(db, mesoBlockId, 'BELONGS_TO_BLOCK');
   // (edges from turns to meso — stored as source=turn, target=meso)
-  // Actually stored source→target as turn→meso, so query target
   const turnEdges = db.prepare(`
     SELECT source_id FROM edges WHERE target_id = ? AND rel_type = 'BELONGS_TO_BLOCK'
   `).all(mesoBlockId) as Array<{ source_id: string }>;

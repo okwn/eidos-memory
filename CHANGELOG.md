@@ -3,6 +3,70 @@
 All notable changes to EidosCore are documented here.
 Format: [Semantic Versioning](https://semver.org)
 
+## [0.2.0] — 2026-05-21
+
+### Added
+- **`eidos connect`** — Universal one-command installer that detects and configures 16 CLIs/IDEs
+  - Claude Code (native plugin system)
+  - Claude Desktop (MCP)
+  - Qwen Code (MCP + permissions)
+  - Gemini CLI (hooks + GEMINI.md context)
+  - Cursor (hooks + MCP + rules)
+  - Windsurf (hooks + rules)
+  - Codex CLI (MCP)
+  - OpenCode (plugin + AGENTS.md)
+  - OpenClaw (extension)
+  - Roo Code (MCP)
+  - Copilot CLI (MCP)
+  - Continue.dev (MCP)
+  - VS Code (MCP)
+  - Antigravity (MCP)
+  - Goose (MCP)
+  - Warp (MCP)
+- **Per-project `.eidos/` directory** — memory lives with the code, not in `~/.eidos/<hash>/`
+- **Auto-init on first use** — `assemble_context` runs full synchronous index on first call
+- **Session resume via QMS** — auto-generate on session end, auto-load on session start
+- **Structured observations** — `remember` stores title, narrative, facts, files_read, files_modified
+- **`get_observation` tool** — get full details of a specific memory with linked nodes
+- **`list_recent` tool** — list recent memories chronologically
+- **`search_memory` modes** — semantic, timeline, and recent search
+- **Session tracking** — `eidos_sessions` table with platform source (qwen/claude/gemini)
+- **Structured memory tables** — `eidos_observations`, `eidos_summaries`, `eidos_prompts` with FTS5
+- **`eidos summarize`** — extract structured observations from conversation turns
+- **`eidos status`** — memory health dashboard: nodes, staleness, disk usage, savings
+- **`eidos diff`** — show what changed since last session
+- **`eidos forget <query>`** — semantic search + interactive soft-delete
+- **`eidos prune`** — run decay pass, archive cold nodes
+- **`eidos clear`** — reset project memory
+- **Shell prompt indicator** — `[eidos]` in PS1 when `.eidos/` exists in cwd
+- **Git post-checkout hook** — auto-reindex on branch switch
+- **Context window bar** — visual `[████░░░░] 2000/4000 tokens` with color coding
+- **AST-aware retrieval** — extracts identifiers from query, matches against skeleton
+- **Import graph traversal** — follows `DEPENDS_ON` edges from active file
+- **Staleness detection** — checks file mtime vs node updated_at
+- **Progressive disclosure** — fast mode (titles only) vs full mode (complete code)
+- **Private tags** — `<private>content</private>` excluded from memory
+- **Dedup** — `remember` checks for identical statements before storing
+- **Implicit feedback** — re-search detection, context precision tracking
+- **HTTP API** — `/api/context/inject`, `/api/sessions/*`, `/api/search`, `/api/health`
+- **Background summarization** — `eidos summarize` with local/ollama/openai backends
+- **Daemon enhancements** — nightly jobs at 2am, health monitoring (DB size)
+
+### Fixed
+- **Staleness bug** — `isNodeStale` used `require('fs')` in ESM module, now uses `import fs`
+- **Staleness comparison** — was comparing against JSON properties, now uses DB column with 1s tolerance
+- **Thin context** — showed only function signatures, now shows full code bodies
+- **HTML indexing** — `.html` files now indexed via `<script>` tag extraction
+- **Gemini path spaces** — `spawnSafe` now quotes binary paths with spaces on Windows
+- **Missing `.bashrc`** — `eidos init` now creates both `.bashrc` and `.bash_profile`
+- **Passthrough feedback** — `eidos wrap <cli>` now shows `[eidos] memory active` message
+- **SYSTEM_PROMPT** — now wired as MCP `instructions` field, more forceful wording
+
+### Changed
+- **66 tests** (was 62) — added end-to-end session resume test + precision + re-search signals
+- **16 MCP tools** (was 12) — added `get_observation`, `list_recent`
+- **`getDbPath()`** — now uses `.eidos/memory.db` in project root (was `~/.eidos/<hash>/`)
+
 ## [0.1.0] — 2026-05-20
 
 ### Added

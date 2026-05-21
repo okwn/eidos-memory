@@ -1,6 +1,5 @@
 import Database from 'better-sqlite3';
 import path from 'path';
-import os from 'os';
 import fs from 'fs';
 import crypto from 'crypto';
 import { createRequire } from 'module';
@@ -11,16 +10,52 @@ let _db: Database.Database | null = null;
 let _vssLoaded = false;
 let _vecBackend: 'vec' | 'vss' | 'none' = 'none';
 
+const PROJECT_MARKERS = ['.git', 'package.json', 'pyproject.toml', 'Cargo.toml', 'go.mod', 'pom.xml', '.svn'];
+
+/**
+ * Walk up from startDir to find the project root (nearest directory containing
+ * a known project marker). Falls back to startDir if none found.
+ */
+export function getProjectRoot(startDir?: string): string {
+  // If an explicit startDir is provided, use it directly (no walking up).
+  // This ensures test isolation and explicit workspace overrides work correctly.
+  if (startDir) return path.resolve(startDir);
+
+  // If EIDOS_WORKSPACE is set (e.g. by tests or MCP server), use it directly.
+  const envWs = process.env['EIDOS_WORKSPACE'];
+  if (envWs) return path.resolve(envWs);
+
+  // Otherwise walk up from cwd to find the nearest project root.
+  let dir = path.resolve(process.cwd());
+  const root = path.parse(dir).root;
+  while (dir !== root) {
+    if (PROJECT_MARKERS.some(m => fs.existsSync(path.join(dir, m)))) {
+      return dir;
+    }
+    dir = path.dirname(dir);
+  }
+  return path.resolve(process.cwd());
+}
+
+/**
+ * Resolve the .eidos directory for the current project.
+ * Creates it if it doesn't exist.
+ */
+export function getEidosDir(startDir?: string): string {
+  const projectRoot = getProjectRoot(startDir);
+  const eidosDir = path.join(projectRoot, '.eidos');
+  fs.mkdirSync(eidosDir, { recursive: true });
+  return eidosDir;
+}
+
 export function getWorkspaceHash(workspacePath?: string): string {
   const ws = workspacePath ?? process.env['EIDOS_WORKSPACE'] ?? process.cwd();
   return crypto.createHash('sha1').update(path.resolve(ws)).digest('hex').slice(0, 12);
 }
 
 export function getDbPath(workspacePath?: string): string {
-  const hash = getWorkspaceHash(workspacePath);
-  const dir = path.join(os.homedir(), '.eidos', hash);
-  fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, 'memory.db');
+  const eidosDir = getEidosDir(workspacePath);
+  return path.join(eidosDir, 'memory.db');
 }
 
 function tryLoadVec(db: Database.Database): boolean {
@@ -86,6 +121,90 @@ export function getDb(workspacePath?: string): Database.Database {
       properties   TEXT
     );
 
+    -- Structured memory tables (Claude Mem-inspired)
+    CREATE TABLE IF NOT EXISTS eidos_sessions (
+      id                   TEXT PRIMARY KEY,
+      project              TEXT NOT NULL,
+      platform             TEXT DEFAULT 'unknown',
+      status               TEXT DEFAULT 'active',
+      started_at           INTEGER,
+      ended_at             INTEGER,
+      last_assistant_msg   TEXT,
+      turn_count           INTEGER DEFAULT 0,
+      total_tokens         INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS eidos_observations (
+      id                   TEXT PRIMARY KEY,
+      session_id           TEXT,
+      project              TEXT NOT NULL,
+      type                 TEXT NOT NULL,
+      title                TEXT,
+      subtitle             TEXT,
+      narrative            TEXT,
+      facts                TEXT,
+      concepts             TEXT,
+      files_read           TEXT,
+      files_modified       TEXT,
+      discovery_tokens     INTEGER DEFAULT 0,
+      content_hash         TEXT,
+      created_at           INTEGER,
+      FOREIGN KEY (session_id) REFERENCES eidos_sessions(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_obs_session ON eidos_observations(session_id);
+    CREATE INDEX IF NOT EXISTS idx_obs_project ON eidos_observations(project);
+    CREATE INDEX IF NOT EXISTS idx_obs_type ON eidos_observations(type);
+    CREATE INDEX IF NOT EXISTS idx_obs_created ON eidos_observations(created_at);
+
+    CREATE TABLE IF NOT EXISTS eidos_summaries (
+      id                   TEXT PRIMARY KEY,
+      session_id           TEXT UNIQUE,
+      project              TEXT NOT NULL,
+      user_requests        TEXT,
+      investigations       TEXT,
+      learnings            TEXT,
+      completed_tasks      TEXT,
+      next_steps           TEXT,
+      total_read_tokens    INTEGER DEFAULT 0,
+      total_discovery_tokens INTEGER DEFAULT 0,
+      started_at           INTEGER,
+      ended_at             INTEGER,
+      FOREIGN KEY (session_id) REFERENCES eidos_sessions(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS eidos_prompts (
+      id                   TEXT PRIMARY KEY,
+      session_id           TEXT,
+      project              TEXT NOT NULL,
+      prompt               TEXT NOT NULL,
+      content_hash         TEXT,
+      created_at           INTEGER,
+      FOREIGN KEY (session_id) REFERENCES eidos_sessions(id)
+    );
+
+    -- Full-text search on prompts
+    CREATE VIRTUAL TABLE IF NOT EXISTS eidos_prompts_fts USING fts5(
+      prompt, content=eidos_prompts, content_rowid=rowid
+    );
+
+    -- Async summarization job queue (non-blocking observation generation)
+    CREATE TABLE IF NOT EXISTS pending_messages (
+      id           TEXT PRIMARY KEY,
+      session_id   TEXT NOT NULL,
+      project      TEXT NOT NULL,
+      message_type TEXT NOT NULL DEFAULT 'summarize',
+      payload      TEXT NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'pending',
+      attempts     INTEGER DEFAULT 0,
+      created_at   INTEGER,
+      processed_at INTEGER,
+      error        TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_messages(status);
+    CREATE INDEX IF NOT EXISTS idx_obs_hash ON eidos_observations(content_hash);
+
     CREATE TABLE IF NOT EXISTS feedback (
       id         TEXT PRIMARY KEY,
       session_id TEXT,
@@ -117,6 +236,74 @@ export function getDb(workspacePath?: string): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_edges_target   ON edges(target_id);
     CREATE INDEX IF NOT EXISTS idx_edges_type     ON edges(rel_type);
   `);
+
+  // ── Migration: v0.1.0 → v0.2.0 ──────────────────────────────────────
+  // Adds content_hash columns, new tables, and indexes for existing databases.
+  const dbVersion = db.pragma('user_version', { simple: true }) as number;
+  if (dbVersion < 2) {
+    console.error('[eidos-db] Running migration v0.1.0 → v0.2.0...');
+
+    // Add content_hash to existing tables (IF NOT EXISTS not supported in ALTER TABLE)
+    try { db.exec(`ALTER TABLE eidos_observations ADD COLUMN content_hash TEXT`); } catch { /* column exists */ }
+    try { db.exec(`ALTER TABLE eidos_prompts ADD COLUMN content_hash TEXT`); } catch { /* column exists */ }
+
+    // Create new tables (safe — uses IF NOT EXISTS)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS eidos_sessions (
+        id                   TEXT PRIMARY KEY,
+        project              TEXT NOT NULL,
+        platform             TEXT DEFAULT 'unknown',
+        status               TEXT DEFAULT 'active',
+        started_at           INTEGER,
+        ended_at             INTEGER,
+        last_assistant_msg   TEXT,
+        turn_count           INTEGER DEFAULT 0,
+        total_tokens         INTEGER DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS eidos_summaries (
+        id                   TEXT PRIMARY KEY,
+        session_id           TEXT UNIQUE,
+        project              TEXT NOT NULL,
+        user_requests        TEXT,
+        investigations       TEXT,
+        learnings            TEXT,
+        completed_tasks      TEXT,
+        next_steps           TEXT,
+        total_read_tokens    INTEGER DEFAULT 0,
+        total_discovery_tokens INTEGER DEFAULT 0,
+        started_at           INTEGER,
+        ended_at             INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS eidos_prompts_fts (
+        prompt TEXT
+      );
+      CREATE TABLE IF NOT EXISTS pending_messages (
+        id           TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL,
+        project      TEXT NOT NULL,
+        message_type TEXT NOT NULL DEFAULT 'summarize',
+        payload      TEXT NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        attempts     INTEGER DEFAULT 0,
+        created_at   INTEGER,
+        processed_at INTEGER,
+        error        TEXT
+      );
+    `);
+
+    // Add new indexes (safe — IF NOT EXISTS)
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_obs_session ON eidos_observations(session_id);
+      CREATE INDEX IF NOT EXISTS idx_obs_project ON eidos_observations(project);
+      CREATE INDEX IF NOT EXISTS idx_obs_type ON eidos_observations(type);
+      CREATE INDEX IF NOT EXISTS idx_obs_created ON eidos_observations(created_at);
+      CREATE INDEX IF NOT EXISTS idx_obs_hash ON eidos_observations(content_hash);
+      CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_messages(status);
+    `);
+
+    db.pragma('user_version = 2');
+    console.error('[eidos-db] Migration complete. Database upgraded to v0.2.0.');
+  }
 
   if (vssOk) {
     try {
@@ -160,6 +347,15 @@ function initDefaultWeights(db: Database.Database): void {
     stmt.run(key, value, now);
   }
 }
+
+/** Default retrieval weight values — single source of truth. */
+export const DEFAULT_WEIGHTS: Record<string, number> = {
+  alpha: 0.6,
+  beta: 0.2,
+  gamma: 0.15,
+  delta: 0.05,
+  epsilon: 0.10,
+};
 
 export interface LifetimeSavings {
   tokens_saved: number;

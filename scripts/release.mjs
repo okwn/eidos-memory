@@ -34,9 +34,17 @@ function bumpVersion(bump) {
 function generateChangelog(version) {
   let log = '';
   try {
+    // Use cross-platform tag lookup (no bash $() or 2>/dev/null)
+    let lastTag = '';
+    try {
+      lastTag = execSync('git describe --tags --abbrev=0 HEAD^', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    } catch {
+      // No previous tag — first release
+    }
+    const range = lastTag ? `${lastTag}..HEAD` : 'HEAD';
     log = execSync(
-      'git log --pretty=format:"- %s (%h)" $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")..HEAD',
-      { encoding: 'utf-8' }
+      `git log --pretty=format:"- %s (%h)" ${range}`,
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
     ).trim();
   } catch {
     log = '- Initial release';

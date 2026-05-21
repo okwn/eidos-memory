@@ -14,7 +14,6 @@ out/
 
 # Environment files
 .env
-.env.*
 .env.local
 .env.development.local
 .env.test.local
@@ -43,9 +42,8 @@ Thumbs.db
 desktop.ini
 ehthumbs.db
 
-# Editor directories
-.vscode/settings.json
-.vscode/launch.json
+# Editor directories and local configs
+.vscode/
 .idea/
 *.suo
 *.ntvs*
@@ -63,8 +61,39 @@ coverage/
 # EidosCore runtime data (user-specific, not source)
 eidos.config.json
 .eidosignore
+.eidos/
+
+# IDE tool configs (user-specific)
+.openclaude/
+.qwen/
+.claude/
+.cursor/
+.windsurf/
+.code-review-graph/
+
+# SQLite database files (safety net)
+*.db
+*.db-shm
+*.db-wal
+
+# Windows artifacts
+nul
 
 # Temp / scratch files
 tmp/
 temp/
 scratch/
+
+# Backup files
+*.orig
+*.bak
+
+# Migration test fixtures
+test-migration/
+
+# Marketing site (separate repo)
+eidos-site/
+
+# Generated icon files
+browser-extension/create-icons.html
+browser-extension/generate-icons.mjs

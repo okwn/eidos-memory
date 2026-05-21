@@ -9,7 +9,7 @@ git clone https://github.com/sairajbaman/eidos-memory
 cd eidos-memory
 npm install
 npm run build
-npm test          # 62 tests must pass
+npm test          # 66 tests must pass
 npm install -g .  # install CLI locally
 eidos doctor      # verify setup
 ```
@@ -21,10 +21,10 @@ eidos doctor      # verify setup
 
 ## Before Opening a PR
 
-1. Run `npm test` — all 62 tests must pass
+1. Run `npm test` — all 66 tests must pass
 2. Run `npx tsc --noEmit` — zero TypeScript errors
 3. Run `eidos doctor` — 11/11 checks green
-4. Add/update tests for any new behaviour
+4. Add/update tests for any new behavior
 
 ## Adding a New Adapter
 

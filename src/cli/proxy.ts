@@ -5,8 +5,7 @@ import { getDb } from '../store/db.js';
 import { embed } from '../engine/embedding.js';
 import { assembleContext } from '../engine/retrieval.js';
 import { estimateBudget } from '../engine/budget.js';
-import { countTokens } from '../engine/tokens.js';
-import { listNodes } from '../store/nodes.js';
+import { buildEssentialsFromTurns } from '../engine/essentials.js';
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool' | 'function';
@@ -39,12 +38,7 @@ async function injectEidosContext(body: ChatCompletionRequest): Promise<ChatComp
   const config = { token_budget: 2000, adaptive_budget: true, model_cost_per_1k_tokens: 0.015 };
   const budgetEst = await estimateBudget(query, config);
 
-  const essentials: Array<{ label: string; content: string }> = [];
-  const turns = listNodes(db, 'conversation_turn', 6).slice(-3);
-  for (const t of turns) {
-    const p = t.properties as Record<string, unknown>;
-    essentials.push({ label: String(p['role']), content: String(p['micro_summary'] ?? '') });
-  }
+  const essentials = buildEssentialsFromTurns(db);
 
   const queryEmbed = await embed(query);
   const result = await assembleContext(db, query, queryEmbed, null, budgetEst.budget, essentials);
@@ -190,9 +184,10 @@ export async function startProxy(port: number, upstream: string): Promise<void> 
     console.log(`[eidos-proxy] Listening on http://localhost:${port} → ${upstream}`);
   });
 
-  // Graceful shutdown
-  process.on('SIGINT', () => {
+  // Graceful shutdown — close DB to release file locks
+  process.on('SIGINT', async () => {
     server.close();
+    try { const { closeDb } = await import('../store/db.js'); closeDb(); } catch { /* non-critical */ }
     process.exit(0);
   });
 }

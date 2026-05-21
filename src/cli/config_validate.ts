@@ -1,5 +1,4 @@
 import fs from 'fs';
-import path from 'path';
 
 const YELLOW = '\x1b[33m';
 const GREEN  = '\x1b[32m';
@@ -21,6 +20,11 @@ const SCHEMA: ConfigSchema[] = [
   { key: 'adaptive_budget',            type: 'boolean', required: true },
   { key: 'auto_index',                 type: 'boolean'  },
   { key: 'auto_index_on_git_commit',   type: 'boolean'  },
+  { key: 'auto_mode',                  type: 'boolean'  },
+  { key: 'auto_index_on_connect',      type: 'boolean'  },
+  { key: 'auto_qms_on_session_end',    type: 'boolean'  },
+  { key: 'auto_assemble_on_prompt',    type: 'boolean'  },
+  { key: 'auto_log_conversations',     type: 'boolean'  },
   { key: 'adapters',                   type: 'string[]' },
   { key: 'mcp_port',                   type: 'number'   },
   { key: 'proxy_port',                 type: 'number'   },
@@ -46,6 +50,11 @@ export const DEFAULT_CONFIG = {
   adaptive_budget: true,
   auto_index: true,
   auto_index_on_git_commit: true,
+  auto_mode: true,
+  auto_index_on_connect: true,
+  auto_qms_on_session_end: true,
+  auto_assemble_on_prompt: true,
+  auto_log_conversations: true,
   adapters: ['claude', 'gemini', 'qwen', 'aider'],
   mcp_port: 3742,
   proxy_port: 4141,

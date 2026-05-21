@@ -16,7 +16,7 @@ export async function handleFeedback(params: Record<string, unknown>) {
   `).run(feedbackId, sessionId, clampedScore, source, Date.now(), JSON.stringify({}));
 
   // Check for implicit signal: re-search within 30s
-  const recentFeedback = db.prepare(`
+  db.prepare(`
     SELECT created_at FROM feedback
     WHERE session_id = ? AND source = 'implicit_research'
     ORDER BY created_at DESC LIMIT 1

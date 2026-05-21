@@ -122,7 +122,7 @@ async function typeWrite(text: string, delayMs = 18): Promise<void> {
   }
 }
 
-async function simulateConversation(demoDir: string): Promise<void> {
+async function simulateConversation(_demoDir: string): Promise<void> {
   const turns = [
     {
       role: 'user',
@@ -238,6 +238,15 @@ export async function runDemo(): Promise<void> {
   console.log(`  ${CYAN}eidos dash${RESET}              — open the visual graph explorer`);
   console.log(`  ${CYAN}eidos init --global${RESET}     — patch your shell for automatic injection\n`);
 
-  // Cleanup temp demo project
-  fs.rmSync(demoDir, { recursive: true, force: true });
+  // Cleanup temp demo project — close DB first to release file locks (Windows)
+  try {
+    const { closeDb, resetDbInstance } = await import('../store/db.js');
+    closeDb();
+    resetDbInstance();
+    // Small delay to let OS release file handles
+    await new Promise(r => setTimeout(r, 150));
+    fs.rmSync(demoDir, { recursive: true, force: true });
+  } catch {
+    // Non-critical: temp dir will be cleaned up by OS eventually
+  }
 }

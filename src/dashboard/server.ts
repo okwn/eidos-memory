@@ -7,8 +7,30 @@ import { fileURLToPath } from 'url';
 import { getDb, getLifetimeSavings } from '../store/db.js';
 import { countNodes, listNodes } from '../store/nodes.js';
 import { readAuditLog } from '../engine/audit.js';
+import { embed } from '../engine/embedding.js';
+import { assembleContext } from '../engine/retrieval.js';
+import {
+  createSession, endSession, getActiveSessions,
+  createObservation, getObservationsByProject, getObservationsByFile,
+  createSummary, getSummariesByProject,
+  recordPrompt, searchPrompts,
+  enqueueMessage, dequeuePending, markMessageProcessing, markMessageCompleted, markMessageFailed,
+} from '../store/memory_store.js';
+import { handleSearchMemory } from '../mcp/tools/search_memory.js';
+import { generateObservations, generateSessionSummary } from '../engine/generation.js';
+import { buildEssentialsFromTurns } from '../engine/essentials.js';
+import type { SummariserBackend } from '../engine/summariser/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function readBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (c: Buffer) => chunks.push(c));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    req.on('error', reject);
+  });
+}
 
 function resolvePublicDir(): string {
   const candidates = [
@@ -85,9 +107,30 @@ export function startDashboard(port: number): void {
 
   const server = http.createServer(async (req, res) => {
     const url = req.url ?? '/';
+    const method = req.method ?? 'GET';
 
-    // CORS for local dev
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // CORS for local dev / browser extension — restrict to trusted origins
+    const origin = req.headers.origin ?? '';
+    const allowedOrigins = [
+      'http://localhost', 'http://127.0.0.1',
+      `http://localhost:${port}`, `http://127.0.0.1:${port}`,
+    ];
+    const isAllowed = !origin
+      || allowedOrigins.some(o => origin === o || origin.startsWith(o + ':'))
+      || origin.startsWith('chrome-extension://')
+      || origin.startsWith('moz-extension://');
+    if (isAllowed) {
+      res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    // Handle CORS preflight
+    if (method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
 
     if (url === '/api/stats') {
       try {
@@ -157,15 +200,351 @@ export function startDashboard(port: number): void {
       return;
     }
 
+    // POST /api/assemble — assemble context for a query (used by browser extension)
+    if (method === 'POST' && url === '/api/assemble') {
+      try {
+        const body = await readBody(req);
+        const parsed = JSON.parse(body) as { query: string; activeFile?: string | null; budget?: number };
+        const query = parsed.query ?? '';
+        if (!query) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'query is required' }));
+          return;
+        }
+
+        const db = getDb();
+        const budget = parsed.budget ?? 2000;
+        const queryEmbedding = await embed(query);
+
+        const essentials = buildEssentialsFromTurns(db);
+
+        const result = await assembleContext(db, query, queryEmbedding, parsed.activeFile ?? null, budget, essentials);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          context: result.contextString,
+          tokens: result.tokens,
+          tokensSaved: result.tokensSaved,
+          breakdown: result.breakdown,
+        }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+      return;
+    }
+
+    // ── Structured Memory API (Claude Mem-inspired) ───────────────────────
+
+    // GET /api/health — health check
+    if (url === '/api/health') {
+      const db = getDb();
+      const nodeCount = countNodes(db);
+      const activeSessions = getActiveSessions();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', nodeCount, activeSessions: activeSessions.length, uptime: process.uptime() }));
+      return;
+    }
+
+    // GET /api/context/inject?project=X — full context timeline for a project
+    if (url.startsWith('/api/context/inject')) {
+      try {
+        const params = new URL(url, 'http://localhost').searchParams;
+        const project = params.get('project') ?? process.cwd();
+
+        // Get recent summaries
+        const summaries = getSummariesByProject(project, 3);
+        // Get recent observations
+        const observations = getObservationsByProject(project, 20);
+
+        let context = `<eidos-context>\nProject: ${project}\nMemory Timeline\n`;
+
+        if (summaries.length > 0) {
+          const s = summaries[0]!;
+          context += `\n── Session Summary (${new Date(s.ended_at).toLocaleString()}) ──\n`;
+          if (s.user_requests) context += `  User wanted: ${s.user_requests}\n`;
+          if (s.learnings) context += `  Learnings: ${s.learnings}\n`;
+          if (s.completed_tasks) context += `  Completed: ${s.completed_tasks}\n`;
+          if (s.next_steps) context += `  Next: ${s.next_steps}\n`;
+        }
+
+        if (observations.length > 0) {
+          context += `\n── Past Observations ──\n`;
+          for (const obs of observations.slice(0, 10)) {
+            const files = obs.files_modified ? JSON.parse(obs.files_modified) as string[] : [];
+            context += `  • ${obs.title}\n`;
+            if (files.length > 0) context += `    Files: ${files.join(', ')}\n`;
+            if (obs.narrative) context += `    Details: ${obs.narrative.slice(0, 150)}\n`;
+          }
+        }
+
+        context += `</eidos-context>`;
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ context, summaries: summaries.length, observations: observations.length }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+      return;
+    }
+
+    // POST /api/sessions/init — create a new session
+    if (method === 'POST' && url === '/api/sessions/init') {
+      try {
+        const body = await readBody(req);
+        const { project, platform, session_id } = JSON.parse(body) as { project: string; platform: string; session_id?: string };
+        const id = createSession(project ?? process.cwd(), platform ?? 'unknown', session_id);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ session_id: id }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+      return;
+    }
+
+    // POST /api/sessions/end — end a session
+    if (method === 'POST' && url === '/api/sessions/end') {
+      try {
+        const body = await readBody(req);
+        const { session_id } = JSON.parse(body) as { session_id: string };
+        endSession(session_id);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+      return;
+    }
+
+    // POST /api/sessions/observations — store an observation
+    if (method === 'POST' && url === '/api/sessions/observations') {
+      try {
+        const body = await readBody(req);
+        const obs = JSON.parse(body) as {
+          session_id: string; project: string; type: string; title: string;
+          narrative?: string; facts?: string[]; files_read?: string[]; files_modified?: string[];
+        };
+        const id = createObservation({
+          session_id: obs.session_id,
+          project: obs.project ?? process.cwd(),
+          type: obs.type ?? 'observation',
+          title: obs.title,
+          narrative: obs.narrative,
+          facts: obs.facts,
+          files_read: obs.files_read,
+          files_modified: obs.files_modified,
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ observation_id: id }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+      return;
+    }
+
+    // POST /api/sessions/summarize — create a session summary
+    if (method === 'POST' && url === '/api/sessions/summarize') {
+      try {
+        const body = await readBody(req);
+        const data = JSON.parse(body) as {
+          session_id: string; project: string;
+          user_requests?: string; learnings?: string; completed_tasks?: string; next_steps?: string;
+        };
+        const id = createSummary({
+          session_id: data.session_id,
+          project: data.project ?? process.cwd(),
+          user_requests: data.user_requests,
+          learnings: data.learnings,
+          completed_tasks: data.completed_tasks,
+          next_steps: data.next_steps,
+        });
+        // Also end the session
+        endSession(data.session_id);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ summary_id: id }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+      return;
+    }
+
+    // POST /api/sessions/trigger-summarize — enqueue async summarization
+    if (method === 'POST' && url === '/api/sessions/trigger-summarize') {
+      try {
+        const body = await readBody(req);
+        const { session_id, project } = JSON.parse(body) as { session_id: string; project: string };
+        const msgId = enqueueMessage({
+          session_id,
+          project: project ?? process.cwd(),
+          message_type: 'summarize',
+          payload: { session_id, project: project ?? process.cwd() },
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ message_id: msgId, status: 'queued' }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+      return;
+    }
+
+    // GET /api/search?q=...&project=X — search memories
+    if (url.startsWith('/api/search')) {
+      try {
+        const params = new URL(url, 'http://localhost').searchParams;
+        const query = params.get('q') ?? '';
+        params.get('project') ?? process.cwd();
+        const mode = params.get('mode') ?? 'semantic';
+
+        if (!query && mode === 'semantic') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'q parameter required for semantic search' }));
+          return;
+        }
+
+        const result = await handleSearchMemory({ query, mode, budget_tokens: 2000 });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(result.content[0]!.text);
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+      return;
+    }
+
+    // GET /api/observations/by-file?file=X&project=X — observations for a specific file
+    if (url.startsWith('/api/observations/by-file')) {
+      try {
+        const params = new URL(url, 'http://localhost').searchParams;
+        const file = params.get('file') ?? '';
+        const project = params.get('project') ?? process.cwd();
+        const observations = getObservationsByFile(file, project);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ observations }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+      return;
+    }
+
+    // POST /api/prompts — record a user prompt
+    if (method === 'POST' && url === '/api/prompts') {
+      try {
+        const body = await readBody(req);
+        const { session_id, project, prompt } = JSON.parse(body) as { session_id: string; project: string; prompt: string };
+        const id = recordPrompt(session_id, project ?? process.cwd(), prompt);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ prompt_id: id }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+      return;
+    }
+
+    // GET /api/prompts/search?q=...&project=X — search prompts
+    if (url.startsWith('/api/prompts/search')) {
+      try {
+        const params = new URL(url, 'http://localhost').searchParams;
+        const query = params.get('q') ?? '';
+        const project = params.get('project') ?? process.cwd();
+        const results = searchPrompts(project, query);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ results }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(e) }));
+      }
+      return;
+    }
+
     // Static files
     const filePath = url === '/' ? path.join(staticDir, 'index.html') : path.join(staticDir, url);
     serveStatic(res, filePath);
   });
+
+  // ── Background Queue Processor ─────────────────────────────────────────
+  // Processes pending summarization jobs every 30 seconds.
+  // This is non-blocking — observations are generated async after session end.
+
+  const processQueue = async () => {
+    const messages = dequeuePending(3);
+    for (const msg of messages) {
+      if (msg.attempts >= 3) {
+        markMessageFailed(msg.id, 'Max attempts exceeded');
+        continue;
+      }
+      markMessageProcessing(msg.id);
+      try {
+        const payload = JSON.parse(msg.payload) as { session_id: string; project: string };
+        const db = getDb();
+
+        // Gather conversation turns from the session
+        const turns = db.prepare(`
+          SELECT properties FROM nodes
+          WHERE type = 'conversation_turn' AND json_extract(properties, '$.session_id') = ?
+          ORDER BY last_accessed ASC LIMIT 20
+        `).all(payload.session_id) as Array<{ properties: string }>;
+
+        const conversation = turns.map((t) => {
+          const p = JSON.parse(t.properties) as { role: string; content: string; micro_summary?: string };
+          return { role: p.role, content: p.content ?? p.micro_summary ?? '' };
+        });
+
+        if (conversation.length > 0) {
+          const backend: SummariserBackend = (process.env['EIDOS_SUMMARISER'] as SummariserBackend) ?? 'local';
+          const [observations, summary] = await Promise.all([
+            generateObservations(conversation, backend),
+            generateSessionSummary(conversation, backend),
+          ]);
+
+          for (const obs of observations) {
+            createObservation({
+              session_id: payload.session_id,
+              project: payload.project,
+              type: obs.type,
+              title: obs.title,
+              narrative: obs.narrative,
+              facts: obs.facts,
+              concepts: obs.concepts,
+              files_read: obs.files_read,
+              files_modified: obs.files_modified,
+            });
+          }
+
+          createSummary({
+            session_id: payload.session_id,
+            project: payload.project,
+            user_requests: summary.user_requests,
+            investigations: summary.investigations,
+            learnings: summary.learnings,
+            completed_tasks: summary.completed_tasks,
+            next_steps: summary.next_steps,
+          });
+        }
+
+        markMessageCompleted(msg.id);
+      } catch (err) {
+        markMessageFailed(msg.id, err instanceof Error ? err.message : String(err));
+      }
+    }
+  };
+
+  // Run processor every 30 seconds
+  const queueInterval = setInterval(processQueue, 30000);
+  // Also run immediately on start
+  processQueue();
 
   server.listen(port, () => {
     console.log(`[eidos-dash] Dashboard running at http://localhost:${port}`);
     console.log(`[eidos-dash] Open your browser to view the graph explorer.`);
   });
 
-  process.on('SIGINT', () => { server.close(); process.exit(0); });
+  process.on('SIGINT', () => { clearInterval(queueInterval); server.close(); process.exit(0); });
 }

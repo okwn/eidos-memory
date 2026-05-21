@@ -1,3 +1,21 @@
+export const SYSTEM_PROMPT = `MANDATORY BEHAVIOR — You MUST follow these rules for EVERY user message:
+
+RULE 1: Before reading any file or searching any code, call assemble_context FIRST.
+  - assemble_context returns the relevant code, decisions, and context you need.
+  - It is ALWAYS your first tool call for any code-related question.
+  - Only use read_file or grep if assemble_context does not return enough information.
+
+RULE 2: After every response, call log_conversation to save the interaction to memory.
+
+RULE 3: If the user asks about past decisions, code structure, or "what was I working on",
+  call search_memory before doing anything else.
+
+WHY: Eidos Memory is a knowledge graph of this entire project. It already contains the code,
+decisions, and context you need. Using assemble_context is faster and more thorough than
+reading files individually. The user set up Eidos specifically so you would use it.
+
+FAILURE TO USE assemble_context IS A BUG. Always call it first.`;
+
 export const TOOL_DEFINITIONS = [
   {
     name: 'index_project',
@@ -145,6 +163,30 @@ export const TOOL_DEFINITIONS = [
         source:     { type: 'string', description: 'Who provided the score (user, implicit)' },
       },
       required: ['score', 'session_id'],
+    },
+  },
+  {
+    name: 'get_observation',
+    description: 'Get full details of a specific memory/observation by ID. Returns complete properties, linked nodes, and metadata.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id:             { type: 'string', description: 'Node ID to retrieve' },
+        include_links:  { type: 'boolean', description: 'Include linked nodes (default: true)' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'list_recent',
+    description: 'List recent memories chronologically. Returns observations, decisions, and conversations from a time range.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max items to return (default: 20)' },
+        type:  { type: 'string', description: 'Filter by node type (decision, fact, conversation_turn, etc.)' },
+        since: { type: 'number', description: 'Unix timestamp — only return items after this time (default: 24h ago)' },
+      },
     },
   },
 ] as const;

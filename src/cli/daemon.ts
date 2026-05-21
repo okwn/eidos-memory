@@ -65,7 +65,8 @@ import { writeFileSync } from 'fs';
 writeFileSync(${JSON.stringify(PID_FILE)}, String(process.pid));
 process.title = 'eidos-daemon';
 
-const env = { ...process.env, EIDOS_MCP_PORT: '${opts.mcp}', EIDOS_PROXY_PORT: '${opts.proxy}', EIDOS_DASH_PORT: '${opts.dash}' };
+const workspace = process.env.EIDOS_WORKSPACE || process.cwd();
+const env = { ...process.env, EIDOS_WORKSPACE: workspace };
 
 // Start proxy
 const proxy = spawn(${JSON.stringify(nodeExe)}, [${JSON.stringify(eidosBin)}, 'proxy', '--port', '${opts.proxy}'], { detached: false, stdio: 'ignore', env });
@@ -82,6 +83,66 @@ const mcpBridge = createServer((socket) => {
 });
 mcpBridge.listen(${opts.mcp}, '127.0.0.1');
 
+// Auto-reindex on file changes (debounced)
+import { watch } from 'fs';
+import { spawnSync } from 'child_process';
+
+const SKIP_DIRS = /node_modules|\\.git|dist|build|\\.next|__pycache__|\\.eidos/;
+let reindexTimer = null;
+const changedFiles = new Set();
+
+const workspace = process.env.EIDOS_WORKSPACE || process.cwd();
+try {
+  watch(workspace, { recursive: true }, (eventType, filename) => {
+    if (!filename || SKIP_DIRS.test(filename)) return;
+    changedFiles.add(filename);
+    if (reindexTimer) clearTimeout(reindexTimer);
+    reindexTimer = setTimeout(() => {
+      const files = [...changedFiles];
+      changedFiles.clear();
+      if (files.length > 0) {
+        try {
+          spawnSync(${JSON.stringify(nodeExe)}, [${JSON.stringify(eidosBin)}, 'index'], { stdio: 'ignore', env });
+        } catch { /* ignore reindex errors */ }
+      }
+    }, 2000);
+  });
+} catch { /* fs.watch recursive not supported on this platform */ }
+
+// Nightly maintenance: run at 2am every day
+const scheduleNightly = () => {
+  const now = new Date();
+  const next2am = new Date(now);
+  next2am.setHours(2, 0, 0, 0);
+  if (next2am <= now) next2am.setDate(next2am.getDate() + 1);
+  const msUntil2am = next2am.getTime() - now.getTime();
+  setTimeout(() => {
+    try {
+      spawnSync(${JSON.stringify(nodeExe)}, [${JSON.stringify(eidosBin)}, 'nightly'], { stdio: 'ignore', env });
+    } catch { /* ignore nightly errors */ }
+    // Reschedule for next day
+    setInterval(() => {
+      try {
+        spawnSync(${JSON.stringify(nodeExe)}, [${JSON.stringify(eidosBin)}, 'nightly'], { stdio: 'ignore', env });
+      } catch { /* ignore */ }
+    }, 86400000); // 24h
+  }, msUntil2am);
+};
+scheduleNightly();
+
+// Health check: log DB size every hour
+setInterval(() => {
+  try {
+    const dbPath = workspace + '/.eidos/memory.db';
+    const stat = require('fs').statSync(dbPath);
+    const sizeMB = (stat.size / 1048576).toFixed(1);
+    console.log('[daemon] Health: DB size ' + sizeMB + ' MB');
+    if (stat.size > 104857600) { // > 100MB
+      console.warn('[daemon] WARNING: DB exceeds 100MB. Consider: eidos prune');
+    }
+  } catch { /* db may not exist yet */ }
+}, 3600000); // 1h
+
 process.on('SIGTERM', () => { proxy.kill(); dash.kill(); mcpBridge.close(); process.exit(0); });
 process.on('SIGINT',  () => { proxy.kill(); dash.kill(); mcpBridge.close(); process.exit(0); });
 `.trim());
@@ -89,6 +150,13 @@ process.on('SIGINT',  () => { proxy.kill(); dash.kill(); mcpBridge.close(); proc
   const child = spawn(nodeExe, [daemonScript], {
     detached: true,
     stdio: ['ignore', 'ignore', fs.openSync(LOG_FILE, 'a')],
+    env: {
+      ...process.env,
+      EIDOS_WORKSPACE: process.env['EIDOS_WORKSPACE'] ?? process.cwd(),
+      EIDOS_MCP_PORT: String(opts.mcp),
+      EIDOS_PROXY_PORT: String(opts.proxy),
+      EIDOS_DASH_PORT: String(opts.dash),
+    },
   });
   child.unref();
 

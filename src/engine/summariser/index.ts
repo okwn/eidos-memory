@@ -87,7 +87,8 @@ async function ollamaSummarise(
 ): Promise<string> {
   const prompt = buildPrompt(text, style, maxTokens);
   try {
-    const res = await fetch('http://localhost:11434/api/generate', {
+    const ollamaHost = process.env['OLLAMA_HOST'] ?? 'http://localhost:11434';
+    const res = await fetch(`${ollamaHost}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, prompt, stream: false, options: { num_predict: maxTokens } }),

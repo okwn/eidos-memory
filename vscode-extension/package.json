@@ -2,11 +2,20 @@
   "name": "eidos-memory-vscode",
   "displayName": "EidosCore Memory",
   "description": "Universal AI memory engine — auto-prefetch context signals in VS Code",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "eidos-memory",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sairajbaman/eidos-memory"
+  },
+  "bugs": {
+    "url": "https://github.com/sairajbaman/eidos-memory/issues"
+  },
   "engines": { "vscode": "^1.85.0" },
   "categories": ["AI", "Other"],
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "workspaceContains:.eidos/**"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "configuration": {

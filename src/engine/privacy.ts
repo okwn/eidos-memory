@@ -19,6 +19,21 @@ function createIgnore(): IgnoreInstance {
 let _ig: IgnoreInstance | null = null;
 let _workspaceRoot = '';
 
+/**
+ * Strip <private>...</private> tags from content.
+ * Users can wrap sensitive content in these tags to exclude it from memory.
+ */
+export function stripPrivateTags(text: string): string {
+  return text.replace(/<private>[\s\S]*?<\/private>/gi, '[private content excluded]').trim();
+}
+
+/**
+ * Check if content contains private tags.
+ */
+export function hasPrivateTags(text: string): boolean {
+  return /<private>/i.test(text);
+}
+
 const SECRET_PATTERNS: Array<{ name: string; pattern: RegExp; replacement: string }> = [
   { name: 'openai-key',    pattern: /sk-[A-Za-z0-9]{20,}/g,                replacement: '[REDACTED_API_KEY]' },
   { name: 'aws-key',       pattern: /AKIA[0-9A-Z]{16}/g,                    replacement: '[REDACTED_AWS_KEY]' },

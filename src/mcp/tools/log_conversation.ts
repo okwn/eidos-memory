@@ -27,6 +27,19 @@ export async function handleLogConversation(params: Record<string, unknown>) {
   const role      = String(params['role'] ?? 'user');
   const content   = String(params['content'] ?? '');
   const sessionId = String(params['session_id'] ?? 'default');
+  const platform  = String(params['platform'] ?? 'unknown'); // qwen, claude, gemini, etc.
+
+  // Ensure session node exists with platform tracking
+  const sessionNodeId = `session:${sessionId}`;
+  const existingSession = db.prepare('SELECT id FROM nodes WHERE id = ?').get(sessionNodeId);
+  if (!existingSession) {
+    upsertNode(db, {
+      id: sessionNodeId,
+      type: 'session',
+      properties: { session_id: sessionId, platform, started_at: Date.now(), status: 'active' },
+      importance: 0.5,
+    });
+  }
 
   const micro = await microSummary(role, content);
   const embedding = await embed(micro);
@@ -35,11 +48,20 @@ export async function handleLogConversation(params: Record<string, unknown>) {
   upsertNode(db, {
     id: turnId,
     type: 'conversation_turn',
-    properties: { role, content, micro_summary: micro, session_id: sessionId },
+    properties: { role, content, micro_summary: micro, session_id: sessionId, platform },
     embedding,
     importance: 0.4,
   });
   insertVec(db, turnId, embedding);
+
+  // Link turn to session
+  upsertEdge(db, {
+    source_id: turnId,
+    target_id: sessionNodeId,
+    rel_type: 'BELONGS_TO_SESSION',
+    weight: 1.0,
+    properties: {},
+  });
 
   // Count turns in this session to decide meso-block creation
   const sessionTurns = listNodes(db, 'conversation_turn', 500)

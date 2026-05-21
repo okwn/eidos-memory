@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import { createRequire } from 'module';
 import { wrapCommand } from './wrap.js';
 import { initCommand } from './init.js';
 import { statsCommand } from './stats.js';
+
+const _require = createRequire(import.meta.url);
+const pkg = _require('../../package.json') as { version: string };
 
 const program = new Command();
 
 program
   .name('eidos')
   .description('EidosCore — Universal AI Memory & Token Efficiency Engine')
-  .version('0.1.0');
+  .version(pkg.version);
 
 program
   .command('index [path]')
@@ -17,6 +21,12 @@ program
   .option('-l, --languages <langs>', 'Comma-separated language list', 'python,typescript,javascript')
   .option('-q, --quiet', 'Suppress output for background indexing')
   .action(async (indexPath: string = '.', opts: { languages: string; quiet?: boolean }) => {
+    const fs = await import('fs');
+    const resolved = indexPath === '.' ? process.cwd() : indexPath;
+    if (!fs.existsSync(resolved)) {
+      console.error(`\x1b[31m[eidos] Path not found: ${resolved}\x1b[0m`);
+      process.exit(1);
+    }
     const { runIndexProject } = await import('./commands/index-project.js');
     await runIndexProject(indexPath, opts.languages.split(','), opts.quiet ?? false);
   });
@@ -77,11 +87,11 @@ mcpCmd
 mcpCmd
   .command('print-config')
   .description('Print MCP client config snippet')
-  .option('-c, --client <name>', 'Client: claude-desktop, continue, vscode, generic', 'claude-desktop')
+  .option('-c, --client <name>', 'Client: claude-desktop, continue, vscode, qwen, generic', 'claude-desktop')
   .option('--copy', 'Auto-write to the client config file')
   .action(async (opts: { client: string; copy?: boolean }) => {
     const { printMcpConfig } = await import('./mcp_config.js');
-    await printMcpConfig(opts.client as 'claude-desktop' | 'continue' | 'vscode' | 'generic', opts.copy ?? false);
+    await printMcpConfig(opts.client as 'claude-desktop' | 'continue' | 'vscode' | 'qwen' | 'generic', opts.copy ?? false);
   });
 
 mcpCmd
@@ -112,6 +122,72 @@ program
   });
 
 program
+  .command('clear')
+  .description('Clear this project\'s .eidos memory directory')
+  .action(async () => {
+    const { clearCommand } = await import('./commands/clear.js');
+    await clearCommand();
+  });
+
+program
+  .command('status')
+  .description('Show memory status for the current project')
+  .action(async () => {
+    const { statusCommand } = await import('./commands/status.js');
+    await statusCommand();
+  });
+
+program
+  .command('diff')
+  .description('Show what changed in memory since last session')
+  .action(async () => {
+    const { diffCommand } = await import('./commands/diff.js');
+    await diffCommand();
+  });
+
+program
+  .command('forget <query>')
+  .description('Forget a decision or fact from memory (soft-delete)')
+  .action(async (query: string) => {
+    const { forgetCommand } = await import('./commands/forget.js');
+    await forgetCommand(query);
+  });
+
+program
+  .command('prune')
+  .description('Run decay pass: reduce importance of old nodes, archive cold ones')
+  .action(async () => {
+    const { pruneCommand } = await import('./commands/forget.js');
+    await pruneCommand();
+  });
+
+program
+  .command('connect')
+  .description('One-command setup: detect all CLIs/IDEs and install Eidos integrations')
+  .option('--all', 'Install for all detected CLIs without prompting')
+  .action(async (opts: { all?: boolean }) => {
+    const { connectCommand } = await import('./connect.js');
+    await connectCommand(opts);
+  });
+
+program
+  .command('summarize')
+  .description('Extract structured observations and summary from the current session')
+  .option('-p, --project <path>', 'Project path', process.cwd())
+  .option('-s, --session-id <id>', 'Session ID', 'default')
+  .option('--platform <name>', 'Platform source', 'unknown')
+  .option('--backend <name>', 'Summariser backend (local, ollama:model, openai:model)', 'local')
+  .action(async (opts: { project: string; sessionId: string; platform: string; backend: string }) => {
+    const { summarizeCommand } = await import('./commands/summarize.js');
+    await summarizeCommand({
+      project: opts.project,
+      session_id: opts.sessionId,
+      platform: opts.platform,
+      backend: opts.backend,
+    });
+  });
+
+program
   .command('export-qms <session-id> [out-file]')
   .description('Export a Quantum Memory Seed to a JSON file')
   .action(async (sessionId: string, outFile: string = `qms-${sessionId}.json`) => {
@@ -123,8 +199,13 @@ program
   .command('import-qms <file>')
   .description('Import a Quantum Memory Seed and pre-warm cache')
   .action(async (file: string) => {
-    const { importQms } = await import('./qms.js');
-    await importQms(file);
+    try {
+      const { importQms } = await import('./qms.js');
+      await importQms(file);
+    } catch (err) {
+      console.error(`\x1b[31m[eidos] ${err instanceof Error ? err.message : String(err)}\x1b[0m`);
+      process.exit(1);
+    }
   });
 
 program
@@ -159,7 +240,10 @@ adapterCmd
 
 const workspacesCmd = program
   .command('workspaces')
-  .description('Manage EidosCore workspaces (multi-project memory)');
+  .description('Manage EidosCore workspaces (multi-project memory)')
+  .action(async () => {
+    workspacesCmd.outputHelp();
+  });
 
 workspacesCmd
   .command('list')
@@ -260,7 +344,10 @@ program
 
 const telemetryCmd = program
   .command('telemetry')
-  .description('Manage opt-in telemetry (privacy-first, open-source)');
+  .description('Manage opt-in telemetry (privacy-first, open-source)')
+  .action(async () => {
+    telemetryCmd.outputHelp();
+  });
 
 telemetryCmd
   .command('on')
@@ -402,22 +489,23 @@ program
   });
 
 program
+  .command('hook <platform> <event>')
+  .description('Stdio JSON hook handler for IDE integrations (gemini, cursor, windsurf)')
+  .action(async (platform: string, event: string) => {
+    const { handleHook } = await import('./commands/hook.js');
+    await handleHook(platform, event);
+  });
+
+program
   .command('version')
   .description('Show EidosCore version and component status')
   .action(async () => {
-    const { createRequire } = await import('module');
-    const _req = createRequire(import.meta.url);
     const GREEN = '\x1b[32m'; const CYAN = '\x1b[36m'; const BOLD = '\x1b[1m'; const RESET = '\x1b[0m'; const DIM = '\x1b[2m';
-    let version = '0.1.0';
-    try {
-      const pkg = _req('../../../package.json') as { version: string };
-      version = pkg.version;
-    } catch { /* use default */ }
-    console.log(`\n${BOLD}${CYAN}⚡ EidosCore${RESET}  v${version}`);
+    console.log(`\n${BOLD}${CYAN}⚡ EidosCore${RESET}  v${pkg.version}`);
     console.log(`${DIM}  Universal AI Memory & Token Efficiency Engine${RESET}`);
     console.log(`\n  ${GREEN}✔${RESET} Node.js       ${process.version}`);
     console.log(`  ${GREEN}✔${RESET} Platform      ${process.platform} ${process.arch}`);
-    console.log(`  ${GREEN}✔${RESET} Package       eidos-memory@${version}`);
+    console.log(`  ${GREEN}✔${RESET} Package       eidos-memory@${pkg.version}`);
     console.log(`\n  ${DIM}Run \`eidos doctor\` for full health check${RESET}\n`);
   });
 
@@ -426,21 +514,17 @@ program
   .description('Check for updates and show how to upgrade')
   .action(async () => {
     const { execSync } = await import('child_process');
-    const { createRequire } = await import('module');
-    const _req = createRequire(import.meta.url);
     const GREEN = '\x1b[32m'; const YELLOW = '\x1b[33m'; const CYAN = '\x1b[36m';
     const BOLD = '\x1b[1m'; const RESET = '\x1b[0m'; const DIM = '\x1b[2m';
-    let current = '0.1.0';
-    try { current = (_req('../../../package.json') as { version: string }).version; } catch { /* ok */ }
     console.log(`\n${BOLD}${CYAN}⚡ EidosCore Update Check${RESET}\n`);
-    console.log(`  Installed:  v${current}`);
+    console.log(`  Installed:  v${pkg.version}`);
     // Check if there's a newer version on npm
     try {
       const latest = execSync('npm info eidos-memory version 2>/dev/null', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-      if (latest && latest !== current) {
+      if (latest && latest !== pkg.version) {
         console.log(`  ${YELLOW}Latest:     v${latest} — update available!${RESET}`);
         console.log(`\n  To upgrade:\n    ${CYAN}npm install -g eidos-memory${RESET}\n`);
-      } else if (latest === current) {
+      } else if (latest === pkg.version) {
         console.log(`  ${GREEN}Latest:     v${latest} — you are up to date ✔${RESET}\n`);
       } else {
         throw new Error('no npm version');
@@ -453,10 +537,21 @@ program
     }
   });
 
+// ── Global error handlers ──────────────────────────────────────────────────
+process.on('unhandledRejection', (reason: unknown) => {
+  console.error('[eidos] Unhandled rejection:', reason instanceof Error ? reason.message : String(reason));
+  process.exit(1);
+});
+
+process.on('uncaughtException', (err: Error) => {
+  console.error('[eidos] Uncaught exception:', err.message);
+  process.exit(1);
+});
+
 // Tab-completion support (run: eidos --install-completion)
 program.enablePositionalOptions();
 
 program.parseAsync(process.argv).catch((err: unknown) => {
-  console.error('[eidos] Fatal error:', err);
+  console.error('[eidos] Fatal error:', err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

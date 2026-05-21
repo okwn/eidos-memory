@@ -14,6 +14,14 @@ const POST_COMMIT_HOOK_WIN = `#!/bin/sh
 eidos index . -q 2>/dev/null &
 `;
 
+const POST_CHECKOUT_HOOK = `#!/bin/sh
+# EidosCore auto-reindex on git checkout/branch switch
+# $1 = previous HEAD, $2 = new HEAD, $3 = 1 (branch checkout) or 0 (file checkout)
+if [ "$3" = "1" ] && command -v eidos >/dev/null 2>&1; then
+  eidos index . -q &
+fi
+`;
+
 const POWERSHELL_PROFILE_SNIPPET = `
 # EidosCore memory injection
 function Invoke-EidosWrap {
@@ -36,6 +44,21 @@ function findGitRoot(startDir: string): string | null {
   }
 }
 
+function installSingleHook(hooksDir: string, hookName: string, hookContent: string): boolean {
+  const hookPath = path.join(hooksDir, hookName);
+  if (fs.existsSync(hookPath)) {
+    const existing = fs.readFileSync(hookPath, 'utf-8');
+    if (existing.includes('EidosCore')) return true;
+    fs.appendFileSync(hookPath, `\n${hookContent}`);
+  } else {
+    fs.writeFileSync(hookPath, hookContent);
+  }
+  if (process.platform !== 'win32') {
+    try { execSync(`chmod +x "${hookPath}"`); } catch { /* ignore */ }
+  }
+  return false;
+}
+
 export function installGitHook(workspaceDir: string): boolean {
   const gitRoot = findGitRoot(workspaceDir);
   if (!gitRoot) {
@@ -46,31 +69,17 @@ export function installGitHook(workspaceDir: string): boolean {
   const hooksDir = path.join(gitRoot, '.git', 'hooks');
   fs.mkdirSync(hooksDir, { recursive: true });
 
-  const hookPath = path.join(hooksDir, 'post-commit');
-  const hookContent = process.platform === 'win32' ? POST_COMMIT_HOOK_WIN : POST_COMMIT_HOOK;
+  const commitContent = process.platform === 'win32' ? POST_COMMIT_HOOK_WIN : POST_COMMIT_HOOK;
+  installSingleHook(hooksDir, 'post-commit', commitContent);
+  console.log(`[eidos] Git post-commit hook installed: ${path.join(hooksDir, 'post-commit')}`);
 
-  if (fs.existsSync(hookPath)) {
-    const existing = fs.readFileSync(hookPath, 'utf-8');
-    if (existing.includes('EidosCore')) {
-      console.log('[eidos] Git post-commit hook already installed.');
-      return true;
-    }
-    // Append to existing hook
-    fs.appendFileSync(hookPath, `\n${hookContent}`);
-  } else {
-    fs.writeFileSync(hookPath, hookContent);
-  }
+  installSingleHook(hooksDir, 'post-checkout', POST_CHECKOUT_HOOK);
+  console.log(`[eidos] Git post-checkout hook installed: ${path.join(hooksDir, 'post-checkout')}`);
 
-  // Make executable on Unix
-  if (process.platform !== 'win32') {
-    try { execSync(`chmod +x "${hookPath}"`); } catch { /* ignore */ }
-  }
-
-  console.log(`[eidos] Git post-commit hook installed: ${hookPath}`);
   return true;
 }
 
-export function installWindowsShellHook(): void {
+export function installWindowsShellHook(detectedClis?: string[]): void {
   const psProfilePath = getPowershellProfile();
   if (!psProfilePath) {
     console.log('[eidos] Could not determine PowerShell profile path.');
@@ -81,15 +90,35 @@ export function installWindowsShellHook(): void {
   fs.mkdirSync(profileDir, { recursive: true });
 
   const marker = '# EidosCore memory injection';
+  const wrapperMarker = '# EidosCore CLI wrappers';
+
+  // Build the full snippet: base function + per-CLI wrappers
+  let snippet = POWERSHELL_PROFILE_SNIPPET;
+  if (detectedClis && detectedClis.length > 0) {
+    snippet += '\n# EidosCore CLI wrappers\n';
+    for (const cli of detectedClis) {
+      snippet += `function ${cli} { Invoke-EidosWrap -Cli ${cli} @args }\n`;
+    }
+  }
+
   if (fs.existsSync(psProfilePath)) {
     const existing = fs.readFileSync(psProfilePath, 'utf-8');
     if (existing.includes(marker)) {
-      console.log(`[eidos] PowerShell profile already patched: ${psProfilePath}`);
+      // Already has the base hook — check if wrappers need adding
+      if (detectedClis && detectedClis.length > 0 && !existing.includes(wrapperMarker)) {
+        fs.appendFileSync(psProfilePath, `\n${wrapperMarker}\n`);
+        for (const cli of detectedClis) {
+          fs.appendFileSync(psProfilePath, `function ${cli} { Invoke-EidosWrap -Cli ${cli} @args }\n`);
+        }
+        console.log(`[eidos] Added CLI wrappers to profile for: ${detectedClis.join(', ')}`);
+      } else {
+        console.log(`[eidos] PowerShell profile already patched: ${psProfilePath}`);
+      }
       return;
     }
-    fs.appendFileSync(psProfilePath, `\n${POWERSHELL_PROFILE_SNIPPET}\n`);
+    fs.appendFileSync(psProfilePath, `\n${snippet}\n`);
   } else {
-    fs.writeFileSync(psProfilePath, POWERSHELL_PROFILE_SNIPPET);
+    fs.writeFileSync(psProfilePath, snippet);
   }
 
   console.log(`[eidos] PowerShell profile patched: ${psProfilePath}`);

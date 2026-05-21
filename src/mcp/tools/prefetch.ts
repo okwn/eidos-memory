@@ -4,6 +4,7 @@ import { touchNode, getNode } from '../../store/nodes.js';
 
 // Simple in-memory warm cache: just touches nodes so recency boost applies
 const _warmCache = new Map<string, number>();
+const MAX_WARM_CACHE = 1000;
 
 export async function handlePrefetch(params: Record<string, unknown>) {
   const db = getDb();
@@ -23,6 +24,11 @@ export async function handlePrefetch(params: Record<string, unknown>) {
   // Touch the file node itself
   touchNode(db, fileId);
   _warmCache.set(fileId, Date.now());
+  // Evict oldest entries if cache grows too large
+  if (_warmCache.size > MAX_WARM_CACHE) {
+    const oldest = [..._warmCache.entries()].sort((a, b) => a[1] - b[1]).slice(0, _warmCache.size - MAX_WARM_CACHE);
+    for (const [k] of oldest) _warmCache.delete(k);
+  }
   warmedCount++;
 
   // Touch all CONTAINS children (chunks)

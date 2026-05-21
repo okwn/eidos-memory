@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head><title>Icon Generator</title></head>
+<body>
+<canvas id="canvas"></canvas>
+<script>
+// Run this page in a browser to download the icon PNGs.
+// Alternatively, use the generated icons already in the icons/ folder.
+const sizes = [16, 32, 48, 128];
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function drawIcon(size) {
+  canvas.width = size;
+  canvas.height = size;
+  ctx.clearRect(0, 0, size, size);
+
+  // Background circle
+  const grad = ctx.createLinearGradient(0, 0, size, size);
+  grad.addColorStop(0, '#667eea');
+  grad.addColorStop(1, '#764ba2');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(size/2, size/2, size/2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Inner circle (brain/memory metaphor)
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = Math.max(1, size / 16);
+  ctx.beginPath();
+  ctx.arc(size/2, size/2, size * 0.3, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Neural connections
+  const cx = size/2, cy = size/2, r = size * 0.2;
+  for (let i = 0; i < 3; i++) {
+    const angle = (i * Math.PI * 2) / 3 - Math.PI / 2;
+    const x = cx + r * Math.cos(angle);
+    const y = cy + r * Math.sin(angle);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(1.5, size / 20), 0, Math.PI * 2);
+    ctx.fill();
+    // Connection line
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = Math.max(0.5, size / 32);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  }
+
+  // Center dot
+  ctx.fillStyle = 'white';
+  ctx.beginPath();
+  ctx.arc(cx, cy, Math.max(1.5, size / 16), 0, Math.PI * 2);
+  ctx.fill();
+
+  // Download
+  const link = document.createElement('a');
+  link.download = `icon${size}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+sizes.forEach((s, i) => setTimeout(() => drawIcon(s), i * 500));
+</script>
+</body>
+</html>

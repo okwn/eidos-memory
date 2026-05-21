@@ -44,6 +44,7 @@ const SUPPORTED_LANGUAGES: Record<string, string[]> = {
   java:       ['.java'],
   c:          ['.c', '.h'],
   cpp:        ['.cpp', '.cc', '.cxx', '.hpp'],
+  html:       ['.html', '.htm'],
 };
 
 function detectLanguage(filePath: string): string | null {
@@ -101,10 +102,6 @@ async function loadGrammar(language: string): Promise<unknown | null> {
   } catch {
     return null;
   }
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 interface ParserInstance {
@@ -222,10 +219,60 @@ function fallbackChunks(source: string, filePath: string, language: string): Cod
   return chunks;
 }
 
+/**
+ * Extract <script> tag contents from HTML files and return as JavaScript chunks.
+ */
+function extractHtmlScripts(source: string, filePath: string): CodeChunk[] {
+  const chunks: CodeChunk[] = [];
+  const scriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  let scriptIndex = 0;
+  while ((match = scriptRegex.exec(source)) !== null) {
+    const scriptContent = match[1]!.trim();
+    if (!scriptContent || scriptContent.length < 10) continue;
+    // Calculate the line offset of this script in the original file
+    const beforeScript = source.slice(0, match.index);
+    const lineOffset = beforeScript.split('\n').length - 1;
+    // Create a chunk for the entire script block
+    const lines = scriptContent.split('\n');
+    chunks.push({
+      id: randomUUID(),
+      filePath,
+      language: 'javascript',
+      startLine: lineOffset,
+      endLine: lineOffset + lines.length - 1,
+      fullBody: scriptContent,
+      chunkType: 'block',
+      name: `script_${scriptIndex}`,
+      confidence: 'high',
+    });
+    scriptIndex++;
+  }
+  // If no scripts found, fall back to treating the whole file as a block
+  if (chunks.length === 0) {
+    chunks.push({
+      id: randomUUID(),
+      filePath,
+      language: 'html',
+      startLine: 0,
+      endLine: source.split('\n').length - 1,
+      fullBody: source.length > 2000 ? source.slice(0, 2000) : source,
+      chunkType: 'fallback',
+      confidence: 'low',
+    });
+  }
+  return chunks;
+}
+
 export async function chunkFile(filePath: string): Promise<CodeChunk[]> {
   const language = detectLanguage(filePath);
   const source = fs.readFileSync(filePath, 'utf-8');
   if (!language) return fallbackChunks(source, filePath, 'unknown');
+
+  // HTML files: extract <script> tags and chunk as JavaScript
+  if (language === 'html') {
+    return extractHtmlScripts(source, filePath);
+  }
 
   const grammar = await loadGrammar(language);
   if (!grammar) return fallbackChunks(source, filePath, language);

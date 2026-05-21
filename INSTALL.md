@@ -74,7 +74,7 @@ is separate — run `eidos init --global` once inside WSL and once in PowerShell
 
 ```
 $ npm install -g eidos-memory
-+ eidos-memory@0.1.0
++ eidos-memory@0.2.0
 
 $ cd ~/my-project
 
@@ -104,7 +104,7 @@ $ eidos doctor
 
   ✔ Node.js                v22.3.0
   ✔ better-sqlite3         connected to :memory: successfully
-  ⚠ sqlite-vss             not available — will use linear cosine fallback
+  ✔ sqlite-vec              vector search available
   ✔ WASM grammars          tree-sitter-wasms/out/ present
   ⚠ Embedding model        cache not found — will auto-download ~22 MB on first use
   ✔ ~/.eidos directory     writable
@@ -189,7 +189,7 @@ export TRANSFORMERS_CACHE=/your/cache/dir
 eidos index .
 ```
 
-### sqlite-vss not loading
+### sqlite-vec not loading
 This is a warning, not an error. EidosCore falls back to linear cosine similarity.
 Vector search still works, just slightly slower on very large codebases (>50k nodes).
 

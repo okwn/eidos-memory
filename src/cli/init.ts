@@ -21,13 +21,27 @@ _eidos_wrap() {
     command "$cmd" "$@"
   fi
 }
+
+# EidosCore prompt indicator: shows [eidos] when .eidos/ exists in current dir
+_eidos_prompt() {
+  if [ -d ".eidos" ]; then
+    echo -e "\\033[36m[eidos]\\033[0m "
+  fi
+}
+# Prepend to existing PROMPT_COMMAND or PS1
+if [ -n "$PROMPT_COMMAND" ]; then
+  PROMPT_COMMAND='_eidos_prompt;'"$PROMPT_COMMAND"
+else
+  PROMPT_COMMAND='_eidos_prompt'
+fi
 `;
 
 function detectInstalledClis(): string[] {
   const found: string[] = [];
+  const whichCmd = process.platform === 'win32' ? 'where' : 'command -v';
   for (const cli of KNOWN_CLIS) {
     try {
-      execSync(`command -v ${cli}`, { stdio: 'ignore' });
+      execSync(`${whichCmd} ${cli} 2>nul`, { stdio: 'ignore' });
       found.push(cli);
     } catch { /* not installed */ }
   }
@@ -36,17 +50,15 @@ function detectInstalledClis(): string[] {
 
 function patchShellProfile(globalMode: boolean): void {
   const home = os.homedir();
+  // Both .bashrc (non-login shells: VS Code terminal, tmux) and .bash_profile (login shells)
+  // are needed. .zshrc covers zsh users.
   const profiles = [
     path.join(home, '.bashrc'),
     path.join(home, '.zshrc'),
     path.join(home, '.bash_profile'),
-  ].filter((p) => fs.existsSync(p));
+  ];
 
-  if (profiles.length === 0) {
-    console.log('[eidos] No shell profiles found. Skipping shell hook installation.');
-    return;
-  }
-
+  const existingProfiles = profiles.filter((p) => fs.existsSync(p));
   const clis = globalMode ? detectInstalledClis() : [];
   let hookContent = SHELL_HOOK;
 
@@ -57,8 +69,20 @@ function patchShellProfile(globalMode: boolean): void {
     }
   }
 
+  // If no bash profiles exist, create both .bashrc and .bash_profile
+  // .bashrc is loaded by non-login shells (VS Code terminal, tmux)
+  // .bash_profile is loaded by login shells (SSH, macOS Terminal)
   const marker = '# EidosCore memory injection';
-  for (const profile of profiles) {
+  if (existingProfiles.length === 0) {
+    const bashrc = path.join(home, '.bashrc');
+    const bashProfile = path.join(home, '.bash_profile');
+    fs.writeFileSync(bashrc, hookContent.trimStart() + '\n');
+    fs.writeFileSync(bashProfile, `source ~/.bashrc\n`);
+    console.log(`[eidos] Created shell profiles: ${bashrc}, ${bashProfile}`);
+    return;
+  }
+
+  for (const profile of existingProfiles) {
     const content = fs.readFileSync(profile, 'utf-8');
     if (content.includes(marker)) {
       console.log(`[eidos] Shell hook already present in ${profile}`);
@@ -66,6 +90,14 @@ function patchShellProfile(globalMode: boolean): void {
     }
     fs.appendFileSync(profile, `\n${hookContent}\n`);
     console.log(`[eidos] Shell hook added to ${profile}`);
+  }
+
+  // Ensure .bashrc exists for non-login shells (VS Code terminal, tmux)
+  // Even if .bash_profile was patched, non-login shells won't see it.
+  const bashrc = path.join(home, '.bashrc');
+  if (!fs.existsSync(bashrc)) {
+    fs.writeFileSync(bashrc, hookContent.trimStart() + '\n');
+    console.log(`[eidos] Created ${bashrc} for non-login shells`);
   }
 }
 
@@ -133,8 +165,20 @@ export async function initCommand(opts: { global: boolean }): Promise<void> {
   // 4. Shell / global setup
   if (opts.global) {
     if (process.platform === 'win32') {
-      installWindowsShellHook();
-      console.log(`  ${c.green('✔')} PowerShell profile patched ${c.dim('(restart PowerShell)')}`);
+      const clis = detectInstalledClis();
+      // PowerShell auto-wrap
+      installWindowsShellHook(clis);
+      if (clis.length > 0) {
+        console.log(`  ${c.green('✔')} PowerShell profile patched with wrappers for: ${clis.join(', ')} ${c.dim('(restart PowerShell)')}`);
+      } else {
+        console.log(`  ${c.green('✔')} PowerShell profile patched ${c.dim('(restart PowerShell)')}`);
+      }
+      // Bash/Git Bash auto-wrap (common on Windows too)
+      patchShellProfile(true);
+      const bashMsg = fs.existsSync(path.join(os.homedir(), '.bash_profile'))
+        ? '(bash start new terminal)'
+        : '(bash created .bash_profile, start new terminal)';
+      console.log(`  ${c.green('✔')} Bash profile patched ${c.dim(bashMsg)}`);
     } else {
       patchShellProfile(true);
       console.log(`  ${c.green('✔')} Shell profile patched ${c.dim('(run: source ~/.bashrc)')}`);
@@ -144,12 +188,20 @@ export async function initCommand(opts: { global: boolean }): Promise<void> {
   // 5. Background index
   spawnBackgroundIndex(workspace);
 
-  // 6. Print MCP snippet
-  const eidosBin = process.platform === 'win32' ? 'eidos.cmd' : 'eidos';
-  console.log(`\n${c.bold('MCP config snippet')} ${c.dim('— add to your client\'s config:')}`);
-  console.log(c.dim('  ┌─────────────────────────────────────────────────────────┐'));
-  console.log(`  ${c.cyan(JSON.stringify({ command: eidosBin, args: ['mcp'], env: { EIDOS_WORKSPACE: workspace } }, null, 2).split('\n').join('\n  '))}`);
-  console.log(c.dim('  └─────────────────────────────────────────────────────────┘'));
+  // 6. Auto-configure MCP clients
+  const { autoDetectAndConfigureMcp } = await import('./mcp_config.js');
+  const configuredClients = await autoDetectAndConfigureMcp(workspace);
+  if (configuredClients.length > 0) {
+    console.log(`  ${c.green('✔')} Auto-configured MCP for: ${c.bold(configuredClients.join(', '))}`);
+    console.log(`    ${c.dim('Restart your AI client to pick up the change.')}`);
+  } else {
+    // Fallback: print snippet for manual config
+    const eidosBin = process.platform === 'win32' ? 'eidos.cmd' : 'eidos';
+    console.log(`\n${c.bold('MCP config snippet')} ${c.dim('— add to your client\'s config:')}`);
+    console.log(c.dim('  ┌─────────────────────────────────────────────────────────┐'));
+    console.log(`  ${c.cyan(JSON.stringify({ command: eidosBin, args: ['mcp'] }, null, 2).split('\n').join('\n  '))}`);
+    console.log(c.dim('  └─────────────────────────────────────────────────────────┘'));
+  }
 
   console.log(`\n${c.green(c.bold('  ✔ EidosCore ready.'))}`);
   if (!opts.global) {

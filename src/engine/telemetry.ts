@@ -63,7 +63,7 @@ export async function maybeSendTelemetry(): Promise<void> {
     const totalSaved = auditRows.reduce((s, r) => s + (r.tokens_saved ?? 0), 0);
 
     // Read version from package.json safely
-    let version = '0.1.0';
+    let version = '0.2.0';
     try {
       const pkgPath = path.join(path.dirname(new URL(import.meta.url).pathname), '../../package.json');
       if (fs.existsSync(pkgPath)) {

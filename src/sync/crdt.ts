@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'crypto';
+import { createCipheriv, createDecipheriv, randomBytes, createHash, pbkdf2Sync } from 'crypto';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -40,8 +40,14 @@ export interface EncryptedSyncPayload {
 
 // ── Encryption / Decryption ───────────────────────────────────────────────────
 
+/** Derive a 256-bit key using PBKDF2 (100k iterations). Falls back to SHA-256 for legacy payloads. */
 function deriveKey(sharedKey: string): Buffer {
-  return createHash('sha256').update(sharedKey).digest(); // 32 bytes for AES-256
+  return pbkdf2Sync(sharedKey, 'eidos-salt-v1', 100000, 32, 'sha256');
+}
+
+/** Legacy key derivation (SHA-256) for backward compatibility with pre-v0.2.0 payloads. */
+function deriveKeyLegacy(sharedKey: string): Buffer {
+  return createHash('sha256').update(sharedKey).digest();
 }
 
 export function encryptPayload(payload: SyncPayload, sharedKey: string): EncryptedSyncPayload {
@@ -61,7 +67,15 @@ export function encryptPayload(payload: SyncPayload, sharedKey: string): Encrypt
 }
 
 export function decryptPayload(enc: EncryptedSyncPayload, sharedKey: string): SyncPayload {
-  const key      = deriveKey(sharedKey);
+  // Try PBKDF2 first, fall back to legacy SHA-256 for backward compatibility
+  try {
+    return tryDecrypt(enc, deriveKey(sharedKey));
+  } catch {
+    return tryDecrypt(enc, deriveKeyLegacy(sharedKey));
+  }
+}
+
+function tryDecrypt(enc: EncryptedSyncPayload, key: Buffer): SyncPayload {
   const iv       = Buffer.from(enc.iv, 'hex');
   const tag      = Buffer.from(enc.tag, 'hex');
   const cipher   = Buffer.from(enc.ciphertext, 'hex');

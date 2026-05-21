@@ -36,8 +36,8 @@ export async function handleGenerateQms(params: Record<string, unknown>) {
   // Top-50 node IDs
   const top50 = weighted.slice(0, 50).map((w) => w.node.id);
 
-  // Weighted mean embedding (384d)
-  const dim = 384;
+  // Weighted mean embedding — dimension detected from first node with an embedding
+  const dim = weighted.find((w) => w.node.embedding)?.node.embedding?.length ?? 384;
   const meanEmbed = new Float32Array(dim);
   let totalWeight = 0;
 

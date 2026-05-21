@@ -3,12 +3,13 @@ import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
-import { getDb, recordSavings } from '../store/db.js';
+import { getDb, recordSavings, getEidosDir, getProjectRoot, getDbPath } from '../store/db.js';
 import { embed } from '../engine/embedding.js';
 import { assembleContext } from '../engine/retrieval.js';
 import { countTokens } from '../engine/tokens.js';
-import { listNodes } from '../store/nodes.js';
 import { handleLogConversation } from '../mcp/tools/log_conversation.js';
+import { recordImplicitFeedback } from '../mcp/tools/feedback.js';
+import { buildEssentialsFromTurns } from '../engine/essentials.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -93,17 +94,56 @@ function buildEnrichedPrompt(adapter: AdapterConfig, context: string, originalPr
   return `${context}\n\n${originalPrompt}`;
 }
 
+// ── Context window bar ─────────────────────────────────────────────────────
+function renderTokenBar(used: number, budget: number): string {
+  if (budget <= 0) return '';
+  const pct = Math.min(1, used / budget);
+  const width = 30;
+  const filled = Math.round(pct * width);
+  const empty = width - filled;
+  const GREEN = '\x1b[32m'; const YELLOW = '\x1b[33m'; const RED = '\x1b[31m';
+  const DIM = '\x1b[2m'; const RESET = '\x1b[0m';
+  const colour = pct < 0.6 ? GREEN : pct < 0.85 ? YELLOW : RED;
+  const bar = colour + '█'.repeat(filled) + DIM + '░'.repeat(empty) + RESET;
+  return `${DIM}[${bar}] ${used}/${budget} tokens${RESET}`;
+}
+
+// ── Auto-init: index on first use if no DB exists ──────────────────────────
+function autoInitIfNeeded(): void {
+  const eidosDir = getEidosDir();
+  const dbPath = path.join(eidosDir, 'memory.db');
+  if (!fs.existsSync(dbPath)) {
+    const projectRoot = getProjectRoot();
+    console.error(`\x1b[36m[eidos] First time in this project. Indexing ${projectRoot} in background...\x1b[0m`);
+    const eidosBin = process.argv[1] ?? 'eidos';
+    const child = spawn(process.execPath, [eidosBin, 'index', projectRoot, '-q'], {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, EIDOS_WORKSPACE: projectRoot },
+    });
+    child.unref();
+  }
+}
+
 export async function wrapCommand(
   cli: string,
   args: string[],
   opts: { query?: string; budget: number },
 ): Promise<void> {
+  autoInitIfNeeded();
   const db = getDb();
   const adapter = loadAdapter(cli);
   const isInteractive = adapter.interactive_mode === true;
   const timeoutMs     = adapter.timeout_ms ?? 60000;
+  process.env['EIDOS_BUDGET'] = String(opts.budget);
   // Stable session ID per process (consistent within one wrap invocation)
   const sessionId = process.env['EIDOS_SESSION_ID'] ?? `wrap:${cli}:${randomUUID().slice(0, 8)}`;
+
+  // Handle --yes flag: enable auto-approve for non-interactive memory storage
+  if (args.includes('--yes')) {
+    process.env['EIDOS_AUTO_APPROVE'] = '1';
+    args = args.filter(a => a !== '--yes');
+  }
 
   // ── Resolve the original prompt ──────────────────────────────────────────
   let originalPrompt = '';
@@ -130,24 +170,31 @@ export async function wrapCommand(
     return;
   }
 
-  if (!query && !isInteractive) {
+  // No prompt: try reading from stdin (pipe mode)
+  let stdinPrompt = '';
+  if (!query && !process.stdin.isTTY) {
+    stdinPrompt = await readStdin();
+  }
+
+  const finalPrompt = query || stdinPrompt;
+
+  // No prompt at all: pass through directly (let interactive CLIs open on their own)
+  if (!finalPrompt) {
+    const DIM = '\x1b[2m'; const CYAN = '\x1b[36m'; const RESET = '\x1b[0m';
+    process.stderr.write(`${DIM}${CYAN}[eidos] memory active — ${getDbPath().includes('.eidos') ? 'project indexed' : 'ready'}${RESET}\n`);
     spawnSafe(cli, args, 'inherit').on('close', code => process.exit(code ?? 0));
     return;
   }
 
   // ── Assemble context ─────────────────────────────────────────────────────
-  const tokensBefore = countTokens(query);
+  const effectiveQuery = finalPrompt;
+  const tokensBefore = countTokens(effectiveQuery);
   let contextString = '';
 
   try {
-    const queryEmbedding = query ? await embed(query) : new Float32Array(384);
-    const essentials: Array<{ label: string; content: string }> = [];
-    const turns = listNodes(db, 'conversation_turn', 6).slice(-3);
-    for (const t of turns) {
-      const p = t.properties as Record<string, unknown>;
-      essentials.push({ label: String(p['role']), content: String(p['micro_summary'] ?? '') });
-    }
-    const result = await assembleContext(db, query, queryEmbedding, null, opts.budget, essentials);
+    const queryEmbedding = effectiveQuery ? await embed(effectiveQuery) : new Float32Array(384);
+    const essentials = buildEssentialsFromTurns(db);
+    const result = await assembleContext(db, effectiveQuery, queryEmbedding, null, opts.budget, essentials);
     contextString = result.contextString;
     const tokensAfter  = countTokens(contextString) + tokensBefore;
     const tokensSaved  = Math.max(0, tokensAfter - tokensBefore);
@@ -160,8 +207,8 @@ export async function wrapCommand(
   // ── Interactive mode: pipe enriched prompt via stdin ─────────────────────
   if (isInteractive) {
     const enrichedStdin = contextString
-      ? buildEnrichedPrompt(adapter, contextString, originalPrompt)
-      : originalPrompt;
+      ? buildEnrichedPrompt(adapter, contextString, finalPrompt)
+      : finalPrompt;
 
     const child = spawnSafe(cli, args, ['pipe', 'inherit', 'inherit']);
 
@@ -178,7 +225,7 @@ export async function wrapCommand(
     child.on('close', (code) => {
       clearTimeout(timer);
       // Log user turn only (can't capture interactive output)
-      if (originalPrompt) autoLogTurns(sessionId, originalPrompt, '');
+      if (finalPrompt) autoLogTurns(sessionId, finalPrompt, '');
       onSessionClose(db, code);
     });
     return;
@@ -186,15 +233,23 @@ export async function wrapCommand(
 
   // ── Non-interactive mode: inject into args, capture stdout for logging ───
   const enrichedArgs = [...args];
+  // Detect Claude print mode: if -p or --print is present, use --system-prompt for context
+  const isPrintMode = args.includes('-p') || args.includes('--print');
   if (contextString) {
     const method = adapter.injection?.method ?? (adapter.inject_as === 'append' ? 'append' : 'prepend');
-    if (method === 'system_flag') {
+    if (method === 'system_flag' || (isPrintMode && adapter.name.includes('claude'))) {
       const flag = adapter.injection?.flag ?? adapter.system_flag ?? '--system-prompt';
-      enrichedArgs.unshift(flag, contextString);
+      // Insert --system-prompt <context> before the first flag
+      const flagIdx = enrichedArgs.findIndex(a => a === '-p' || a === '--print' || a.startsWith('-'));
+      if (flagIdx >= 0) {
+        enrichedArgs.splice(flagIdx, 0, flag, contextString);
+      } else {
+        enrichedArgs.unshift(flag, contextString);
+      }
     } else {
-      const enrichedPrompt = buildEnrichedPrompt(adapter, contextString, originalPrompt);
-      const targetIdx = args.findIndex(a => a === originalPrompt);
-      if (targetIdx >= 0) enrichedArgs[targetIdx] = enrichedPrompt;
+      const enrichedPrompt = buildEnrichedPrompt(adapter, contextString, finalPrompt);
+      const targetIdx = args.findIndex(a => a === finalPrompt || a === originalPrompt);
+      if (targetIdx >= 0 && finalPrompt) enrichedArgs[targetIdx] = enrichedPrompt;
       else enrichedArgs.push(enrichedPrompt);
     }
   }
@@ -211,36 +266,73 @@ export async function wrapCommand(
 
   child.on('close', (code) => {
     // Auto-log user + assistant turns (fire-and-forget)
-    autoLogTurns(sessionId, originalPrompt, assistantResponse.trim());
+    autoLogTurns(sessionId, finalPrompt, assistantResponse.trim());
+    // Calculate context precision from AI response
+    if (assistantResponse && contextString) {
+      try {
+        const { calculatePrecision } = require('../mcp/tools/assemble_context.js') as typeof import('../mcp/tools/assemble_context.js');
+        const prec = calculatePrecision(sessionId, assistantResponse);
+        process.env['EIDOS_PRECISION'] = String(prec);
+        if (prec > 0) {
+          recordImplicitFeedback(sessionId, prec > 50 ? 4 : 3, 'implicit_precision');
+        }
+      } catch { /* non-critical */ }
+    }
     onSessionClose(db, code);
   });
 }
 
 function onSessionClose(db: import('better-sqlite3').Database, code: number | null): void {
   const saved = parseInt(process.env['EIDOS_TOKENS_SAVED'] ?? '0', 10);
+  const sessionTokens = parseInt(process.env['EIDOS_SESSION_TOKENS'] ?? '0', 10);
+  const precision = parseInt(process.env['EIDOS_PRECISION'] ?? '0', 10);
   const costPer1k = parseFloat(process.env['EIDOS_MODEL_COST'] ?? '0.015');
   const dollarsSaved = (saved / 1000) * costPer1k;
+  const budget = parseInt(process.env['EIDOS_BUDGET'] ?? '2000', 10);
+  if (sessionTokens > 0) {
+    process.stderr.write(`\n${renderTokenBar(sessionTokens, budget)}\n`);
+  }
   if (saved > 0) {
-    const GREEN = '\x1b[32m'; const BOLD = '\x1b[1m'; const RESET = '\x1b[0m';
-    process.stderr.write(`\n${GREEN}${BOLD}[eidos] saved ~${saved.toLocaleString()} tokens (~$${dollarsSaved.toFixed(4)}) this session.${RESET}\n`);
-    // Synchronous UPSERT — must complete before process.exit() is called below
+    const GREEN = '\x1b[32m'; const BOLD = '\x1b[1m'; const DIM = '\x1b[2m'; const RESET = '\x1b[0m';
+    const precisionStr = precision > 0 ? ` ${DIM}(${precision}% precise)${RESET}` : '';
+    process.stderr.write(`${GREEN}${BOLD}[eidos]${RESET} injected ${sessionTokens} tokens${precisionStr}, saved ~${saved.toLocaleString()} tokens (~$${dollarsSaved.toFixed(4)})${RESET}\n`);
     try { recordSavings(db, saved, dollarsSaved); } catch { /* non-critical */ }
   }
   process.exit(code ?? 0);
 }
 
-// Safe spawn: resolves binary path on Unix; uses shell only on Windows (required for .cmd files)
+// Safe spawn: resolves binary path on Unix; on Windows uses cmd /c for .cmd/.bat files
+// without shell: true for arguments (prevents DEP0190 and command injection).
 function spawnSafe(
   cli: string,
   args: string[],
   stdio: 'inherit' | ['pipe' | 'inherit', 'pipe' | 'inherit', 'pipe' | 'inherit'],
 ) {
+  const env = {
+    ...process.env,
+    EIDOS_WORKSPACE: process.env['EIDOS_WORKSPACE'] ?? getProjectRoot(),
+    ...(process.env['EIDOS_AUTO_APPROVE'] === '1' ? { EIDOS_AUTO_APPROVE: '1' } : {}),
+  };
   if (process.platform === 'win32') {
-    return spawn(cli, args, { stdio, shell: true });
+    // On Windows, .cmd/.bat files require shell execution. Use cmd /c with the
+    // binary as a single quoted argument to avoid injection via args.
+    const isCmdFile = cli.endsWith('.cmd') || cli.endsWith('.bat');
+    if (isCmdFile) {
+      return spawn('cmd', ['/c', cli, ...args], { stdio, env });
+    }
+    // For .exe and other binaries, spawn directly without shell (no DEP0190).
+    return spawn(cli, args, { stdio, env });
   }
-  return spawn(resolveBinary(cli), args, { stdio, shell: false });
+  return spawn(resolveBinary(cli), args, { stdio, shell: false, env });
 }
 
-function spawnPassthrough(cli: string, args: string[]) {
-  return spawnSafe(cli, args, 'inherit');
+/** Read all of stdin with a timeout. Returns empty string on TTY or timeout. */
+function readStdin(): Promise<string> {
+  return new Promise((resolve) => {
+    if (process.stdin.isTTY) { resolve(''); return; }
+    const chunks: Buffer[] = [];
+    const timer = setTimeout(() => resolve(''), 5000);
+    process.stdin.on('data', (chunk: Buffer) => chunks.push(chunk));
+    process.stdin.on('end', () => { clearTimeout(timer); resolve(Buffer.concat(chunks).toString('utf-8').trim()); });
+  });
 }

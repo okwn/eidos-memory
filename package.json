@@ -7,10 +7,14 @@
   "bin": {
     "eidos": "dist/cli/index.js"
   },
-  "main": "./dist/cli/index.js",
+  "main": "./dist/store/db.js",
+  "types": "./dist/store/db.d.ts",
+  "module": "./dist/store/db.js",
   "scripts": {
     "build": "tsc && node -e \"const fs=require('fs'),path=require('path');const src='src/dashboard/public';const dst='dist/dashboard/public';fs.mkdirSync(dst,{recursive:true});fs.readdirSync(src).forEach(f=>fs.copyFileSync(path.join(src,f),path.join(dst,f)));console.log('[build] Copied dashboard/public → dist/dashboard/public');\"",
+    "clean": "rm -rf dist/",
     "dev": "tsc --watch",
+    "pretest": "npm run build",
     "start": "node dist/cli/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -19,7 +23,7 @@
     "nightly": "node dist/tuner/nightly.js",
     "dash": "node dist/cli/index.js dash",
     "postinstall": "node -e \"if(process.env.npm_config_global){console.log('\\n\\x1b[36m⚡ EidosCore installed!\\x1b[0m  Run \\x1b[1meidos setup\\x1b[0m to get started in 30 seconds.\\n')}\"",
-    "prepublishOnly": "npm run build && npm test",
+    "prepublishOnly": "npm run clean && npm run build && npm test && node -e \"const fs=require('fs'),p=require('path');function r(d){for(const f of fs.readdirSync(d,{withFileTypes:true})){const fp=p.join(d,f.name);if(f.isDirectory())r(fp);else if(fp.endsWith('.js.map')||fp.endsWith('.d.ts.map'))fs.unlinkSync(fp)}}r('dist')\"",
     "release": "node scripts/release.mjs",
     "release:minor": "node scripts/release.mjs minor",
     "release:major": "node scripts/release.mjs major",
@@ -31,17 +35,30 @@
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
-    "CONTRIBUTING.md",
-    "CODE_OF_CONDUCT.md",
     "INSTALL.md",
-    ".env.example",
-    ".github/"
+    ".env.example"
   ],
   "exports": {
-    ".": "./dist/cli/index.js",
-    "./mcp": "./dist/mcp/server.js",
-    "./store": "./dist/store/db.js",
-    "./engine": "./dist/engine/embedding.js"
+    ".": {
+      "types": "./dist/store/db.d.ts",
+      "import": "./dist/store/db.js"
+    },
+    "./mcp": {
+      "types": "./dist/mcp/server.d.ts",
+      "import": "./dist/mcp/server.js"
+    },
+    "./engine": {
+      "types": "./dist/engine/embedding.d.ts",
+      "import": "./dist/engine/embedding.js"
+    },
+    "./store": {
+      "types": "./dist/store/db.d.ts",
+      "import": "./dist/store/db.js"
+    },
+    "./cli": {
+      "types": "./dist/cli/index.d.ts",
+      "import": "./dist/cli/index.js"
+    }
   },
   "repository": {
     "type": "git",

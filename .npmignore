@@ -1,0 +1,51 @@
+# Source maps (not needed at runtime)
+dist/**/*.js.map
+dist/**/*.d.ts.map
+
+# Source TypeScript (only compiled JS is needed)
+src/
+
+# Tests
+test/
+test-migration/
+
+# Config files
+tsconfig.json
+vitest.config.ts
+eidos.config.json
+.eidosignore
+.env.example
+
+# IDE / tool configs
+.vscode/
+.openclaude/
+.qwen/
+.claude/
+.cursor/
+.windsurf/
+.code-review-graph/
+
+# CI/CD
+.github/
+
+# Build scripts
+scripts/
+
+# Marketing site
+eidos-site/
+
+# Browser extension (separate product)
+browser-extension/
+
+# VS Code extension (separate product)
+vscode-extension/
+
+# Logs and temp
+*.log
+*.tgz
+tmp/
+temp/
+
+# OS files
+.DS_Store
+Thumbs.db

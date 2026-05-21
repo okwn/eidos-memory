@@ -46,7 +46,7 @@ jobs:
         run: npm run build
 
       - name: Run tests
-        run: npm run test -- --coverage
+        run: npm run test
 
       - name: Doctor check
         run: node dist/cli/index.js doctor

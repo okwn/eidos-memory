@@ -46,8 +46,8 @@ describe('stress: bulk node insertion', () => {
 
     const count = db.prepare('SELECT COUNT(*) as c FROM nodes').get() as { c: number };
     expect(count.c).toBeGreaterThanOrEqual(500);
-    // Should insert 500 nodes in under 5 seconds
-    expect(elapsed).toBeLessThan(5000);
+    // CI runners can be slow — use generous threshold
+    expect(elapsed).toBeLessThan(process.env.CI ? 30000 : 5000);
   });
 
   it('retrieves nodes efficiently after bulk insert', async () => {
@@ -113,7 +113,8 @@ describe('stress: edge insertion', () => {
 
     const count = db.prepare('SELECT COUNT(*) as c FROM edges').get() as { c: number };
     expect(count.c).toBe(edgeCount);
-    expect(elapsed).toBeLessThan(5000);
+    // CI runners can be slow — use generous threshold
+    expect(elapsed).toBeLessThan(process.env.CI ? 30000 : 5000);
   });
 });
 

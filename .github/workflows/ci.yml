@@ -52,3 +52,6 @@ jobs:
         run: node dist/cli/index.js doctor
         env:
           EIDOS_WORKSPACE: ${{ runner.temp }}/eidos-test-workspace
+
+      - name: Lint check
+        run: npx tsc --noEmit --pretty

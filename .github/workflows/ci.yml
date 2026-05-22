@@ -45,6 +45,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Verify build output
+        run: node -e "const fs=require('fs');['dist/cli/index.js','dist/store/index.js'].forEach(f=>{if(!fs.existsSync(f))throw new Error('Missing: '+f)});console.log('Build output verified');"
+
       - name: Run tests
         run: npm run test
 

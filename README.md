@@ -33,14 +33,14 @@ That's it. Restart your CLI — EidosCore auto-indexes on first use and injects 
 
 | | |
 |---|---|
-| **🧠 Persistent Memory** | AI remembers decisions, bugs, and context across sessions |
-| **🔌 Universal** | Works with Claude, Gemini, Qwen, Cursor, Windsurf, VS Code, and 10+ more |
-| **🔒 Local-First** | All data stays on your machine — `.eidos/` in your project folder |
-| **⚡ Sub-10ms** | Hybrid retrieval (vector + graph + AST) in milliseconds |
-| **📉 95%+ Token Savings** | Reuse context instead of re-sending it — saves $$ |
-| **🌐 Web Dashboard** | Visual knowledge graph explorer + live stats at `localhost:7842` |
-| **🔄 Async Summarization** | Auto-generates structured observations after each session |
-| **📦 MCP Native** | 16 tools via Model Context Protocol — works with any MCP client |
+| 🧠 Persistent Memory | AI remembers decisions, bugs, and context across sessions |
+| 🔌 Universal | Works with Claude, Gemini, Qwen, Cursor, Windsurf, VS Code, and 10+ more |
+| 🔒 Local-First | All data stays on your machine — `.eidos/` in your project folder |
+| ⚡ Sub-10ms | Hybrid retrieval (vector + graph + AST) in milliseconds |
+| 📉 95%+ Token Savings | Reuse context instead of re-sending it — saves $$ |
+| 🌐 Web Dashboard | Visual knowledge graph explorer + live stats at `localhost:7842` |
+| 🔄 Async Summarization | Auto-generates structured observations after each session |
+| 📦 MCP Native | 16 tools via Model Context Protocol — works with any MCP client |
 
 [→ Full feature details](docs/index.md)
 

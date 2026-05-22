@@ -36,7 +36,8 @@
     "LICENSE",
     "CHANGELOG.md",
     "INSTALL.md",
-    ".env.example"
+    ".env.example",
+    "docs/"
   ],
   "exports": {
     ".": {

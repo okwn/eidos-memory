@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.0 (2026-05-21)
+
+### Documentation
+- Rewrote README.md to be concise and scannable — moved detailed docs to `docs/` directory
+- Added 11 comprehensive documentation files:
+  - `docs/getting-started.md` — Installation and quick start guide
+  - `docs/commands.md` — Full CLI commands reference
+  - `docs/architecture.md` — Deep dive into how EidosCore works
+  - `docs/mcp-tools.md` — All 16 MCP tools with examples
+  - `docs/api-reference.md` — REST API endpoint reference
+  - `docs/integrations.md` — CLI/IDE integration methods
+  - `docs/configuration.md` — Config file and env vars reference
+  - `docs/database.md` — SQLite schema documentation
+  - `docs/development.md` — Contributing and development guide
+  - `docs/privacy.md` — Privacy and security details
+- Added `docs/` to npm package files list
+- Added Docs links to site Navbar and Footer
+
 All notable changes to EidosCore are documented here.
 Format: [Semantic Versioning](https://semver.org)
 

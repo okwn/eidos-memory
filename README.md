@@ -19,13 +19,27 @@ A local-first knowledge graph that gives any AI CLI persistent memory across ses
 
 ## 🚀 Quick Start
 
+### 1. Install globally
+
 ```bash
 npm install -g eidos-memory
+```
+
+### 2. Connect all CLIs and IDEs
+
+```bash
 eidos connect          # detects all CLIs, writes configs, starts daemon
 eidos status           # verify memory is working
 ```
 
-That's it. Restart your CLI — EidosCore auto-indexes on first use and injects memory automatically.
+### 3. Verify it's working
+
+```bash
+eidos demo             # run built-in benchmark demo
+eidos status --verbose # show all detected platforms and memory stats
+```
+
+That's it. Restart your CLI — EidosCore auto-indexes on first use and injects memory automatically. The daemon runs in the background at `localhost:7842` (web dashboard).
 
 ---
 

@@ -7,6 +7,43 @@ on:
     branches: [main, dev]
 
 jobs:
+  build:
+    name: Build Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: eidos-embedding-model-${{ runner.os }}
+          restore-keys: eidos-embedding-model-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify build output
+        run: |
+          if [ ! -f dist/cli/index.js ]; then
+            echo "ERROR: Build output dist/cli/index.js not found"
+            exit 1
+          fi
+          if [ ! -f dist/store/db.js ]; then
+            echo "ERROR: Build output dist/store/db.js not found"
+            exit 1
+          fi
+          echo "Build verification passed"
+
   test:
     name: Test (Node ${{ matrix.node-version }})
     runs-on: ${{ matrix.os }}

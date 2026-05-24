@@ -7,6 +7,17 @@ on:
     branches: [main, dev]
 
 jobs:
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        env:
+          SHELLCHECK_OPTS: -s bash -S error
+
   test:
     name: Test (Node ${{ matrix.node-version }})
     runs-on: ${{ matrix.os }}

@@ -32,7 +32,7 @@ describe('memory decay', () => {
       properties: { name: 'oldFn' },
       importance: 0.8,
     });
-    // Manually backdate last_accessed
+    // Mannually backdate last_accessed
     const hundredDaysAgo = Date.now() - 100 * 86_400_000;
     db.prepare(`UPDATE nodes SET last_accessed = ?, updated_at = ? WHERE id = ?`)
       .run(hundredDaysAgo, hundredDaysAgo, id);

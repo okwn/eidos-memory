@@ -148,7 +148,7 @@ export async function printMcpConfig(client: McpClient, copyFlag: boolean): Prom
       console.error(`${c.red('✖')} Could not write config: ${e}`);
     }
   } else if (copyFlag) {
-    console.log(`\n${c.yellow('⚠')} No known config path for ${client} — copy the snippet above manually.\n`);
+    console.log(`\n${c.yellow('⚠')} No known config path for ${client} — copy the snippet above mannually.\n`);
   } else {
     console.log(`\n${c.dim('Add the snippet above to your client config, or run with --copy to auto-write.')}\n`);
   }
@@ -199,7 +199,7 @@ function mergeQwenConfig(existing: Record<string, unknown>, snippet: Record<stri
 
 /**
  * Detect all installed MCP clients and auto-configure EidosCore for each one.
- * Called during `eidos init` so users never have to manually edit config files.
+ * Called during `eidos init` so users never have to mannually edit config files.
  */
 export async function autoDetectAndConfigureMcp(workspace: string): Promise<string[]> {
   const configured: string[] = [];

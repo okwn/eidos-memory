@@ -98,3 +98,5 @@ That's it. Restart your CLI — EidosCore auto-indexes on first use and injects 
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
+- Documentation updated for clarity

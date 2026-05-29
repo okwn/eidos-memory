@@ -51,3 +51,6 @@ Open a GitHub issue with:
 - OS and Node.js version
 - `eidos doctor` output
 - Minimal reproduction steps
+
+## Contributors
+- Documentation improvements (2026)
